@@ -1,0 +1,128 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<!-- No external scripts, styles, fonts or images are used anywhere in this
+     dashboard, which lets the policy below be as tight as a policy gets:
+     nothing loads from anywhere except this origin, and inline script is
+     refused outright. Headlines arrive from the open web, so the renderer
+     also never assigns untrusted text to innerHTML — see app.js. -->
+<meta http-equiv="Content-Security-Policy" content="
+  default-src 'self';
+  script-src 'self';
+  style-src 'self';
+  img-src 'self';
+  connect-src 'self';
+  font-src 'self';
+  object-src 'none';
+  base-uri 'none';
+  form-action 'none';
+  frame-ancestors 'none';">
+<title>Portfolio News</title>
+<link rel="stylesheet" href="app.css" />
+</head>
+<body>
+<a class="skip" href="#results">Skip to headlines</a>
+
+<header class="top">
+  <div class="brand">
+    <h1>Portfolio News</h1>
+    <p class="sub">Headlines across the holdings. Links open at the publisher &mdash; nothing is copied here.</p>
+  </div>
+  <dl class="meter">
+    <div><dt>Headlines</dt><dd id="mCount">&mdash;</dd></div>
+    <div><dt>Companies</dt><dd id="mCos">&mdash;</dd></div>
+    <div><dt>Updated</dt><dd id="mUpdated">&mdash;</dd></div>
+  </dl>
+</header>
+
+<p class="notice" id="notice" hidden></p>
+
+<main class="shell">
+
+  <section class="rail" aria-label="Companies">
+    <div class="railhead">
+      <label class="lbl" for="coSearch">Find a company</label>
+      <input type="search" id="coSearch" placeholder="Name, ticker or country" autocomplete="off" />
+      <div class="railbtns">
+        <button type="button" class="link" id="coAll">Select all</button>
+        <button type="button" class="link" id="coNone">Clear</button>
+        <span class="count" id="coCount"></span>
+      </div>
+      <p class="hint">The bar under each name shows the last 28 days. A mark is a day that produced a headline.</p>
+    </div>
+    <ul class="colist" id="coList"></ul>
+  </section>
+
+  <section class="main">
+
+    <div class="filters">
+      <div class="field">
+        <label class="lbl" for="dFrom">From</label>
+        <input type="date" id="dFrom" />
+      </div>
+      <div class="field">
+        <label class="lbl" for="dTo">To</label>
+        <input type="date" id="dTo" />
+      </div>
+      <div class="field">
+        <span class="lbl">Quick range</span>
+        <div class="seg" id="segRange" role="group" aria-label="Quick date range">
+          <button type="button" data-days="7">7d</button>
+          <button type="button" data-days="30">30d</button>
+          <button type="button" data-days="0" class="on">All</button>
+        </div>
+      </div>
+      <div class="field">
+        <span class="lbl">Certainty</span>
+        <div class="seg" id="segConf" role="group" aria-label="Match certainty">
+          <button type="button" data-conf="all" class="on">All</button>
+          <button type="button" data-conf="high">Confirmed</button>
+          <button type="button" data-conf="low">Needs a look</button>
+        </div>
+      </div>
+      <div class="field">
+        <label class="lbl" for="srcSel">Source</label>
+        <select id="srcSel">
+          <option value="all">Both feeds</option>
+          <option value="gdelt">GDELT</option>
+          <option value="gnews">Google News</option>
+        </select>
+      </div>
+      <div class="field grow">
+        <label class="lbl" for="qText">Search headlines</label>
+        <input type="search" id="qText" placeholder="Word or phrase" autocomplete="off" />
+      </div>
+      <div class="field">
+        <span class="lbl">&nbsp;</span>
+        <button type="button" class="btn" id="resetAll">Reset filters</button>
+      </div>
+    </div>
+
+    <div class="resultbar">
+      <p id="resultLine" class="resultline">&mdash;</p>
+      <div class="sortwrap">
+        <label class="lbl inline" for="sortSel">Sort</label>
+        <select id="sortSel">
+          <option value="new">Newest first</option>
+          <option value="old">Oldest first</option>
+          <option value="company">By company</option>
+        </select>
+      </div>
+    </div>
+
+    <div id="results" class="results" tabindex="-1"></div>
+    <button type="button" class="btn more" id="moreBtn" hidden>Show more headlines</button>
+  </section>
+</main>
+
+<footer class="foot">
+  <p>Headlines and links are collected from GDELT DOC 2.0 and Google News RSS. Article text is never
+     retrieved or stored &mdash; each result is a headline and a link to the publisher.
+     Results marked <em>needs a look</em> matched a company name that could refer to something else.</p>
+</footer>
+
+<script src="app.js" defer></script>
+</body>
+</html>
