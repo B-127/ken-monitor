@@ -22,12 +22,47 @@ from .. import net, schema
 ENDPOINT = "https://news.google.com/rss/search"
 
 MAX_ALIASES_PER_QUERY = 4
+MAX_SCOPE_TERMS = 6
+
+
+def _or_block(terms: list[str]) -> str:
+    block = " OR ".join(f'"{t}"' for t in terms)
+    return f"({block})" if len(terms) > 1 else block
+
+
+def build_queries(entity) -> list[str]:
+    """One query per chunk of aliases, each scoped by required_terms.
+
+    Google News treats a space as AND, so the scope block narrows the search
+    at the source rather than after download.
+    """
+    # Strong aliases are self-scoping — "AWPLR" needs no "Sri Lanka" beside it —
+    # so they are chunked separately and queried unscoped. Only the weak,
+    # generic terms carry the scope block. Scoping the strong ones too would
+    # silently drop coverage that is already unambiguous.
+    strong = sorted((a for a in entity.aliases if a not in entity.weak),
+                    key=len, reverse=True)
+    weak = sorted((a for a in entity.aliases if a in entity.weak),
+                  key=len, reverse=True)
+
+    scope = ""
+    if entity.required_terms:
+        scope = " " + _or_block(
+            sorted(entity.required_terms, key=len, reverse=True)[:MAX_SCOPE_TERMS])
+
+    def _chunk(terms):
+        return [terms[i:i + MAX_ALIASES_PER_QUERY] for i in range(0, len(terms), MAX_ALIASES_PER_QUERY)]
+
+    pairs = ([(c, "") for c in _chunk(strong)]
+             + [(c, scope) for c in _chunk(weak)])
+    pairs = pairs[:schema.MAX_QUERY_CHUNKS]
+
+    return [_or_block(chunk) + suffix for chunk, suffix in pairs]
 
 
 def build_query(entity) -> str:
-    """Google News search expression: quoted aliases joined by OR."""
-    aliases = sorted(entity.aliases, key=len, reverse=True)[:MAX_ALIASES_PER_QUERY]
-    return " OR ".join(f'"{a}"' for a in aliases)
+    """First query only. Retained for callers that want a single expression."""
+    return build_queries(entity)[0]
 
 
 def _parse_pubdate(value: str) -> str | None:
@@ -62,14 +97,16 @@ def _split_publisher(title: str, fallback: str) -> tuple[str, str]:
 
 
 def fetch_articles(entity, fetcher=net.fetch) -> list[dict]:
-    params = {
-        "q": build_query(entity),
-        "hl": "en-US",
-        "gl": "US",
-        "ceid": "US:en",
-    }
-    body = fetcher(f"{ENDPOINT}?{urlencode(params)}", accept="application/rss+xml")
-    return parse(body)
+    seen: set[str] = set()
+    out: list[dict] = []
+    for query in build_queries(entity):
+        params = {"q": query, "hl": "en-US", "gl": "US", "ceid": "US:en"}
+        body = fetcher(f"{ENDPOINT}?{urlencode(params)}", accept="application/rss+xml")
+        for item in parse(body):
+            if item["url"] not in seen:
+                seen.add(item["url"])
+                out.append(item)
+    return out
 
 
 def parse(body: bytes) -> list[dict]:

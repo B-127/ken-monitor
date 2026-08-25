@@ -23,15 +23,61 @@ ENDPOINT = "https://api.gdeltproject.org/api/v2/doc/doc"
 # because longer names are the more distinctive ones.
 MAX_ALIASES_PER_QUERY = 6
 
+# Scope terms are ANDed in alongside; keep the block short enough that the
+# combined expression stays within what the endpoint accepts.
+MAX_SCOPE_TERMS = 8
+
+
+def _or_block(terms: list[str]) -> str:
+    block = " OR ".join(f'"{t}"' for t in terms)
+    return f"({block})" if len(terms) > 1 else block
+
+
+def build_queries(entity, *, english_only: bool = False) -> list[str]:
+    """One query per chunk of aliases, each scoped by required_terms.
+
+    A company row has a handful of aliases and yields a single query. A macro
+    row carries dozens of terms, so they are split across several queries -
+    GDELT rejects an over-long OR block, and a bloated one returns noise.
+
+    Where the row is scoped, the scope block is ANDed in at the source
+    (juxtaposition means AND in GDELT's syntax) rather than only filtered
+    afterwards. That is the difference between asking for "Sri Lankan
+    inflation news" and downloading the world's inflation news to discard it.
+    """
+    # Strong aliases are self-scoping — "AWPLR" needs no "Sri Lanka" beside it —
+    # so they are chunked separately and queried unscoped. Only the weak,
+    # generic terms carry the scope block. Scoping the strong ones too would
+    # silently drop coverage that is already unambiguous.
+    strong = sorted((a for a in entity.aliases if a not in entity.weak),
+                    key=len, reverse=True)
+    weak = sorted((a for a in entity.aliases if a in entity.weak),
+                  key=len, reverse=True)
+
+    scope = ""
+    if entity.required_terms:
+        scope = " " + _or_block(
+            sorted(entity.required_terms, key=len, reverse=True)[:MAX_SCOPE_TERMS])
+
+    def _chunk(terms):
+        return [terms[i:i + MAX_ALIASES_PER_QUERY] for i in range(0, len(terms), MAX_ALIASES_PER_QUERY)]
+
+    pairs = ([(c, "") for c in _chunk(strong)]
+             + [(c, scope) for c in _chunk(weak)])
+    pairs = pairs[:schema.MAX_QUERY_CHUNKS]
+
+    out = []
+    for chunk, suffix in pairs:
+        query = _or_block(chunk) + suffix
+        if english_only:
+            query += " sourcelang:english"
+        out.append(query)
+    return out
+
 
 def build_query(entity, *, english_only: bool = False) -> str:
-    """Quoted-phrase OR block, e.g. ("Tokyo Cement" OR "TKYO")."""
-    aliases = sorted(entity.aliases, key=len, reverse=True)[:MAX_ALIASES_PER_QUERY]
-    block = " OR ".join(f'"{a}"' for a in aliases)
-    query = f"({block})" if len(aliases) > 1 else block
-    if english_only:
-        query += " sourcelang:english"
-    return query
+    """First query only. Retained for callers that want a single expression."""
+    return build_queries(entity, english_only=english_only)[0]
 
 
 def _parse_seendate(value: str) -> str | None:
@@ -45,18 +91,29 @@ def _parse_seendate(value: str) -> str | None:
 
 def fetch_articles(entity, start: dt.date, end: dt.date,
                    fetcher=net.fetch) -> list[dict]:
-    """Return raw {headline, url, published, publisher} dicts for one entity."""
-    params = {
-        "query": build_query(entity),
-        "mode": "ArtList",
-        "format": "json",
-        "maxrecords": str(schema.MAX_ITEMS_PER_FEED),
-        "sort": "DateDesc",
-        "startdatetime": start.strftime("%Y%m%d") + "000000",
-        "enddatetime": end.strftime("%Y%m%d") + "235959",
-    }
-    body = fetcher(f"{ENDPOINT}?{urlencode(params)}", accept="application/json")
-    return parse(body)
+    """Return raw {headline, url, published, publisher} dicts for one entity.
+
+    Results across query chunks are deduplicated by URL here, so a headline
+    matching two of a macro row's terms is fetched once, not twice.
+    """
+    seen: set[str] = set()
+    out: list[dict] = []
+    for query in build_queries(entity):
+        params = {
+            "query": query,
+            "mode": "ArtList",
+            "format": "json",
+            "maxrecords": str(schema.MAX_ITEMS_PER_FEED),
+            "sort": "DateDesc",
+            "startdatetime": start.strftime("%Y%m%d") + "000000",
+            "enddatetime": end.strftime("%Y%m%d") + "235959",
+        }
+        body = fetcher(f"{ENDPOINT}?{urlencode(params)}", accept="application/json")
+        for item in parse(body):
+            if item["url"] not in seen:
+                seen.add(item["url"])
+                out.append(item)
+    return out
 
 
 def parse(body: bytes) -> list[dict]:
