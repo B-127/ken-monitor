@@ -1,0 +1,7 @@
+# Needed only to RUN the collector locally or in CI.
+# The dashboard is fully static and requires none of this.
+requests>=2.31        # HTTP, with TLS verification on by default
+defusedxml>=0.7.1     # XXE / entity-expansion safe RSS parsing
+# Optional: only for `build_entities.py --workbook` coverage cross-checks.
+# pandas>=2.0
+# openpyxl>=3.1

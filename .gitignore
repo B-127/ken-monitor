@@ -1,0 +1,7 @@
+__pycache__/
+*.pyc
+*.lock
+*.tmp
+.venv/
+# local safety copies of the archive, not history
+backups/
