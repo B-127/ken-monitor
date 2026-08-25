@@ -1,4 +1,4 @@
-# Portfolio News Monitor
+# Ken Portfolio Monitor
 
 Headlines and links for the 74 companies in the portfolio, collected daily from
 free structured feeds and served as a static dashboard. **No article text is
