@@ -64,6 +64,8 @@ class Entity:
     aliases: list[str]
     context_terms: list[str]
     negative_terms: list[str]
+    required_terms: list[str]
+    kind: str
     country: str
     industry: str
     ambiguous: bool
@@ -74,12 +76,24 @@ class Entity:
     _alias_res: list[re.Pattern] = field(default_factory=list, repr=False)
     _context_res: list[re.Pattern] = field(default_factory=list, repr=False)
     _negative_res: list[re.Pattern] = field(default_factory=list, repr=False)
+    _required_res: list[re.Pattern] = field(default_factory=list, repr=False)
 
     def compile(self) -> "Entity":
         self._alias_res = [_term_pattern(a) for a in self.aliases]
         self._context_res = [_term_pattern(t) for t in self.context_terms]
         self._negative_res = [_term_pattern(t) for t in self.negative_terms]
+        self._required_res = [_term_pattern(t) for t in self.required_terms]
         return self
+
+    @property
+    def is_macro(self) -> bool:
+        return self.kind == "macro"
+
+    def has_required(self, text: str) -> bool:
+        """True when the scope condition is met, or when there isn't one."""
+        if not self._required_res:
+            return True
+        return any(rx.search(text) for rx in self._required_res)
 
     def matched_alias(self, text: str) -> tuple[str, bool] | None:
         """Return (alias, is_weak) for the first alias found, else None.
@@ -120,6 +134,10 @@ def _row_errors(row: dict, seen_tickers: set[str]) -> list[str]:
     if status not in schema.STATUSES:
         errs.append(f"status '{status}' not in {sorted(schema.STATUSES)}")
 
+    kind = row["kind"].strip().lower()
+    if kind not in schema.KINDS:
+        errs.append(f"kind '{kind}' not in {sorted(schema.KINDS)}")
+
     ambiguous = row["ambiguous"].strip().lower()
     if ambiguous not in schema.YES_NO:
         errs.append(f"ambiguous '{ambiguous}' must be yes or no")
@@ -149,6 +167,19 @@ def _row_errors(row: dict, seen_tickers: set[str]) -> list[str]:
         errs.append("ambiguous='yes' but no alias is marked weak with a leading '~'")
     if ambiguous == "no" and weak:
         errs.append(f"alias(es) marked weak {weak} but ambiguous='no'")
+
+    # A macro row's aliases ("inflation", "budget deficit") would otherwise
+    # match every economics story on earth. Refuse the row outright rather than
+    # let an unscoped theme flood the archive.
+    required = _split(row.get("required_terms", ""))
+    if kind == "macro" and not required:
+        errs.append("macro rows must supply required_terms to scope them")
+    for t in required:
+        if len(t) < 3:
+            errs.append(f"required term '{t}' is too short to scope safely")
+        from .matching import normalise as _fold2
+        if _fold2(t) != t:
+            errs.append(f"required term '{t}' must be stored accent-folded")
 
     verified = (row.get("verified") or "").strip()
     if verified and not re.fullmatch(r"\d{4}-\d{2}-\d{2}", verified):
@@ -193,6 +224,8 @@ def load(path: str) -> list[Entity]:
             weak={a.lstrip("~") for a in _split(row["aliases"]) if a.startswith("~")},
             context_terms=_split(row.get("context_terms", "")),
             negative_terms=_split(row.get("negative_terms", "")),
+            required_terms=_split(row.get("required_terms", "")),
+            kind=row["kind"].strip().lower(),
             country=(row.get("country") or "").strip(),
             industry=(row.get("industry") or "").strip(),
             ambiguous=row["ambiguous"].strip().lower() == "yes",

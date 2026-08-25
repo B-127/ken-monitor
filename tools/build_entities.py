@@ -375,15 +375,133 @@ ROWS: list[tuple] = [
 ]
 
 
+# ---------------------------------------------------------------------------
+# Macro rows: Sri Lankan economic news by segment.
+#
+# These behave differently from company rows. Their aliases ("inflation",
+# "budget deficit", "exchange rate") are globally generic, so every macro row
+# carries required_terms and matches NOTHING unless a Sri Lanka marker is also
+# present. The scope block is ANDed into the feed query itself, so the search
+# asks for Sri Lankan inflation news rather than downloading the world's.
+#
+# Two tiers of alias, exactly as for companies:
+#   strong  - unambiguously Sri Lankan on their own (CBSL, AWPLR, CCPI)
+#   ~weak   - generic economic vocabulary that needs the context terms
+#
+# Scope markers. The first group appear in headlines. The outlet names that
+# follow appear in the publisher field instead, which is a hint rather than
+# proof - a Sri Lankan paper also reports on the rest of the world - so a match
+# scoped only by the publisher is graded 'low' for the analyst to confirm.
+# ---------------------------------------------------------------------------
+
+_SCOPE = ("Sri Lanka|Sri Lankan|Colombo|CBSL|Central Bank of Sri Lanka|rupee|LKR|Lankan"
+          "|EconomyNext|Daily FT|Daily Mirror|The Island|Sunday Times|Ada Derana"
+          "|Newsfirst|Daily News|Sunday Observer|Ceylon Today")
+
+MACRO_ROWS: list[tuple] = [
+    ("SL MACRO MONETARY", "Sri Lanka - Monetary",
+     "CBSL|Central Bank of Sri Lanka|Monetary Policy Board|Monetary Board"
+     "|Overnight Policy Rate|Standing Deposit Facility Rate"
+     "|Standing Lending Facility Rate|Statutory Reserve Ratio"
+     "|AWPLR|AWDR|AWFDR|CCPI|NCPI|Colombo Consumer Price Index"
+     "|National Consumer Price Index"
+     "|~inflation|~headline inflation|~core inflation|~disinflation|~deflation"
+     "|~policy rate|~rate cut|~rate hike|~monetary policy|~money supply"
+     "|~broad money|~reserve money|~open market operations|~market liquidity"
+     "|~private sector credit|~credit growth|~inflation target",
+     "Sri Lanka|Colombo|CBSL|rupee|monetary|inflation|policy rate|central bank",
+     "", "Sri Lanka", "Monetary", "yes", "active",
+     "Economic theme, not a holding. Only matches when a Sri Lanka marker is present.",
+     "", "macro", _SCOPE),
+
+    ("SL MACRO FISCAL", "Sri Lanka - Fiscal",
+     "Ministry of Finance|Inland Revenue Department|Appropriation Bill"
+     "|Domestic Debt Optimisation|Sri Lanka Development Bond"
+     "|Social Security Contribution Levy|Ceylon Petroleum Corporation"
+     "|Ceylon Electricity Board|SriLankan Airlines|Employees Provident Fund"
+     "|~budget deficit|~fiscal deficit|~primary balance|~primary surplus"
+     "|~tax revenue|~PAYE|~income tax|~corporate tax|~excise duty|~customs duty"
+     "|~public debt|~debt restructuring|~debt sustainability|~sovereign default"
+     "|~capital expenditure|~recurrent expenditure|~subsidy|~Treasury bill"
+     "|~Treasury bond|~government securities|~fiscal consolidation"
+     "|~state-owned enterprise",
+     "Sri Lanka|Colombo|budget|Treasury|fiscal|tax|debt|government|rupee",
+     "", "Sri Lanka", "Fiscal", "yes", "active",
+     "Economic theme, not a holding. Only matches when a Sri Lanka marker is present.",
+     "", "macro", _SCOPE),
+
+    ("SL MACRO EXTERNAL", "Sri Lanka - External",
+     "Board of Investment|Export Development Board|Port of Colombo|Hambantota"
+     "|Extended Fund Facility|Official Creditor Committee|Paris Club"
+     "|International Sovereign Bond"
+     "|~balance of payments|~current account|~trade deficit|~trade balance"
+     "|~exports|~imports|~remittances|~worker remittances|~tourist arrivals"
+     "|~tourism earnings|~foreign reserves|~gross official reserves"
+     "|~foreign direct investment|~exchange rate|~depreciation|~appreciation"
+     "|~currency swap|~external debt|~terms of trade|~import restrictions",
+     "Sri Lanka|Colombo|rupee|IMF|reserves|exports|imports|tourism|remittances",
+     "", "Sri Lanka", "External", "yes", "active",
+     "Economic theme, not a holding. Only matches when a Sri Lanka marker is present.",
+     "", "macro", _SCOPE),
+
+    ("SL MACRO REAL", "Sri Lanka - Real",
+     "Department of Census and Statistics|Sri Lanka Tea Board|Ceylon Tea"
+     "|~gross domestic product|~economic growth|~GDP growth|~recession"
+     "|~economic contraction|~industrial production|~Purchasing Managers Index"
+     "|~manufacturing output|~services sector|~agriculture output"
+     "|~paddy harvest|~construction sector|~unemployment|~labour force"
+     "|~per capita income|~poverty rate",
+     "Sri Lanka|Colombo|economy|GDP|growth|output|sector|employment",
+     "", "Sri Lanka", "Real", "yes", "active",
+     "Economic theme, not a holding. Only matches when a Sri Lanka marker is present.",
+     "", "macro", _SCOPE),
+
+    ("SL MACRO FINANCIAL", "Sri Lanka - Financial",
+     "Colombo Stock Exchange|All Share Price Index|S&P SL20|Bank of Ceylon"
+     "|People's Bank|National Savings Bank|Commercial Bank of Ceylon"
+     "|Sampath Bank|Hatton National Bank|Seylan Bank|NDB Bank"
+     "|~banking sector|~non-performing loans|~capital adequacy"
+     "|~licensed commercial banks|~finance companies|~lending rates"
+     "|~deposit rates|~bond yields|~market capitalisation|~market turnover"
+     "|~foreign inflows|~sovereign rating|~credit rating|~rating upgrade"
+     "|~rating downgrade",
+     "Sri Lanka|Colombo|CSE|bourse|bank|rupee|listed|equities|bond",
+     "", "Sri Lanka", "Financial", "yes", "active",
+     "Economic theme, not a holding. Only matches when a Sri Lanka marker is present.",
+     "", "macro", _SCOPE),
+
+    ("SL MACRO COMMODITIES", "Sri Lanka - Commodities",
+     "Colombo Tea Auction|Ceylon Cinnamon"
+     "|~tea prices|~rubber prices|~coconut prices|~cinnamon exports"
+     "|~gold price|~crude oil|~fuel prices|~fuel price revision"
+     "|~electricity tariff|~fertiliser",
+     "Sri Lanka|Colombo|tea|rubber|coconut|cinnamon|fuel|electricity|import",
+     "", "Sri Lanka", "Commodities", "yes", "active",
+     "Economic theme, not a holding. Only matches when a Sri Lanka marker is present.",
+     "", "macro", _SCOPE),
+]
+
+
 def build_rows() -> list[dict]:
     rows = []
-    for (ticker, name, aliases, context, negative, country, industry,
-         ambiguous, status, note, verified) in ROWS:
+    for row in ROWS:
+        (ticker, name, aliases, context, negative, country, industry,
+         ambiguous, status, note, verified) = row
         rows.append({
             "ticker": ticker, "name": name, "aliases": aliases,
             "context_terms": context, "negative_terms": negative,
             "country": country, "industry": industry, "ambiguous": ambiguous,
             "status": status, "note": note, "verified": verified,
+            "kind": "company", "required_terms": "",
+        })
+    for (ticker, name, aliases, context, negative, country, industry,
+         ambiguous, status, note, verified, kind, required) in MACRO_ROWS:
+        rows.append({
+            "ticker": ticker, "name": name, "aliases": aliases,
+            "context_terms": context, "negative_terms": negative,
+            "country": country, "industry": industry, "ambiguous": ambiguous,
+            "status": status, "note": note, "verified": verified,
+            "kind": kind, "required_terms": required,
         })
     return rows
 
@@ -439,7 +557,27 @@ def main() -> int:
     loaded = ent.load(OUT)
     unverified = [e.ticker for e in loaded if not e.verified]
     ambiguous = [e.ticker for e in loaded if e.ambiguous]
+    # Query-plan check: a row whose terms need more chunks than the limit
+    # allows would lose its tail silently, so surface it here.
+    from tools.sources import gdelt as _gd, gnews as _gn
+    truncated = []
+    for e in loaded:
+        n_terms = len(e.aliases)
+        need_g = -(-len([a for a in e.aliases if a not in e.weak]) // _gd.MAX_ALIASES_PER_QUERY) \
+               + -(-len([a for a in e.aliases if a in e.weak]) // _gd.MAX_ALIASES_PER_QUERY)
+        need_n = -(-len([a for a in e.aliases if a not in e.weak]) // _gn.MAX_ALIASES_PER_QUERY) \
+               + -(-len([a for a in e.aliases if a in e.weak]) // _gn.MAX_ALIASES_PER_QUERY)
+        if max(need_g, need_n) > schema.MAX_QUERY_CHUNKS:
+            truncated.append(f"{e.ticker} needs {max(need_g, need_n)} chunks")
+    reqs = sum(len(_gd.build_queries(e)) + len(_gn.build_queries(e)) for e in loaded)
+
     print(f"validated {len(loaded)} entities")
+    print(f"  macro rows                             : "
+          f"{sum(1 for e in loaded if e.is_macro)}")
+    print(f"  requests per collection run            : {reqs}"
+          f"  (~{reqs * schema.HTTP_MIN_INTERVAL_SECONDS / 60:.0f} min at the politeness floor)")
+    if truncated:
+        print(f"  TRUNCATED QUERY PLANS (terms will be lost): {truncated}")
     print(f"  ambiguous (need context to score high): {len(ambiguous)}")
     print(f"  corporate status not yet verified      : {len(unverified)}")
     return 0

@@ -81,6 +81,7 @@ def make_record(entity, raw: dict, source: str, confidence: str) -> dict | None:
         "source": source,
         "publisher": (raw.get("publisher") or "").strip()[:120],
         "confidence": confidence,
+        "kind": entity.kind,
     }
 
 
@@ -140,8 +141,16 @@ def merge(existing: list[dict], incoming: list[dict]) -> tuple[list[dict], int]:
 
 def apply_window(records: list[dict],
                  cap: int = schema.MAX_ARCHIVE_RECORDS,
-                 floor: int = schema.PER_TICKER_FLOOR) -> list[dict]:
-    """Trim to `cap`, protecting each ticker's newest `floor` records."""
+                 floor: int = schema.PER_TICKER_FLOOR,
+                 macro_share: float = schema.MACRO_SHARE_OF_ARCHIVE) -> list[dict]:
+    """Trim to `cap` under two protections.
+
+    Each row keeps its newest `floor` records, so a heavily-covered name cannot
+    evict a quiet one entirely. Beyond the floors, macro records are held to
+    `macro_share` of the cap: six economic themes covering ~170 terms otherwise
+    out-produce all 74 companies put together and would push the equities the
+    portfolio actually holds out of the window.
+    """
     ordered = sorted(records, key=lambda r: r.get("published", ""), reverse=True)
     if len(ordered) <= cap:
         return ordered
@@ -163,11 +172,32 @@ def apply_window(records: list[dict],
     if len(protected) >= cap:
         return protected[:cap]
 
-    return sorted(
-        protected + remainder[: cap - len(protected)],
-        key=lambda r: r.get("published", ""),
-        reverse=True,
-    )
+    slots = cap - len(protected)
+    macro_budget = max(0, int(cap * macro_share) -
+                       sum(1 for r in protected if r.get("kind") == "macro"))
+
+    filler: list[dict] = []
+    for rec in remainder:
+        if len(filler) >= slots:
+            break
+        if rec.get("kind") == "macro":
+            if macro_budget <= 0:
+                continue
+            macro_budget -= 1
+        filler.append(rec)
+
+    # If company volume could not fill the window, let macro take the slack
+    # rather than shipping a half-empty archive.
+    if len(filler) < slots:
+        chosen = {id(r) for r in filler}
+        for rec in remainder:
+            if len(filler) >= slots:
+                break
+            if id(rec) not in chosen:
+                filler.append(rec)
+
+    return sorted(protected + filler,
+                  key=lambda r: r.get("published", ""), reverse=True)
 
 
 def entity_manifest(entities) -> list[dict]:
@@ -184,6 +214,7 @@ def entity_manifest(entities) -> list[dict]:
         "industry": e.industry,
         "status": e.status,
         "note": e.note,
+        "kind": e.kind,
     } for e in entities]
 
 

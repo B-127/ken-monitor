@@ -5,10 +5,18 @@ inspected — the project never fetches article bodies. That is a real
 constraint on what can be known, so the rules are deliberately conservative
 and the outcome is graded rather than binary:
 
-    reject  a negative term fired, or no alias appeared at all
+    reject  a negative term fired, no alias appeared, or a scoped row's
+            required term was absent
     high    an alias appeared and either the name is distinctive, or an
             ambiguous name was corroborated by a context term
-    low     an ambiguous name appeared with nothing to corroborate it
+    low     an ambiguous name appeared with nothing to corroborate it, or the
+            row's scope was satisfied only by the publisher rather than the
+            headline itself
+
+Rows carrying required_terms - the macro themes - are scoped: "inflation" only
+counts when a Sri Lanka marker is also present. A marker found in the headline
+is proof; one found only in the publisher name is a hint, and downgrades the
+result to low rather than settling it.
 
 Low-confidence matches are kept and flagged, not discarded — the analyst
 filters them in the dashboard. The point is that they are never silently
@@ -58,9 +66,23 @@ def score(entity: Entity, headline: str, publisher: str = "") -> tuple[str, str]
         return REJECT, "no alias in headline"
     alias, is_weak = hit
 
-    # A distinctive alias settles it on its own.
+    # A strong alias settles it on its own, and on a macro row it is also its
+    # own proof of scope: "AWPLR" and "CCPI" are Sri Lankan by construction, so
+    # they need no separate marker and must be tested BEFORE the scope gate.
     if not is_weak:
         return HIGH, f"alias '{alias}'"
+
+    # From here the alias is weak, so the row's scope must carry it. Absent
+    # altogether, the article is not ours at all.
+    if not entity.has_required(haystack):
+        return REJECT, "weak alias but required scope term absent"
+
+    # A weak alias on a scoped row needs the marker in the headline itself.
+    # Finding it only in the outlet's name is suggestive, not conclusive — a
+    # Sri Lankan paper also reports on the rest of the world — so the analyst
+    # is asked to confirm rather than told.
+    if entity.required_terms and not entity.has_required(text):
+        return LOW, f"weak alias '{alias}', scope only from publisher"
 
     if entity.has_context(haystack):
         return HIGH, f"weak alias '{alias}' + context"

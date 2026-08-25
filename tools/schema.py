@@ -22,6 +22,8 @@ ENTITY_COLS = [
     "status",          # see STATUSES
     "note",            # analyst-facing note, e.g. "acquired by Thiess, Oct 2022"
     "verified",        # ISO date the corporate status was last checked, or ""
+    "kind",            # see KINDS - company or macro topic
+    "required_terms",  # pipe-separated; at least one MUST appear, or reject
 ]
 
 ENTITY_KEY = "ticker"
@@ -36,8 +38,13 @@ STATUSES = {
 
 YES_NO = {"yes", "no"}
 
+# A 'company' row tracks one issuer. A 'macro' row tracks an economic theme -
+# inflation, the budget, reserves - whose vocabulary is globally generic, so
+# such rows are only permitted with required_terms that scope them.
+KINDS = {"company", "macro"}
+
 # Fields that must never be blank.
-ENTITY_REQUIRED = ["ticker", "name", "aliases", "country", "ambiguous", "status"]
+ENTITY_REQUIRED = ["ticker", "name", "aliases", "country", "ambiguous", "status", "kind"]
 
 # --------------------------------------------------------------------------
 # Article record (docs/data/articles.json).
@@ -52,6 +59,7 @@ ARTICLE_COLS = [
     "source",      # "gdelt" | "gnews"
     "publisher",   # outlet name where the feed gives one, else ""
     "confidence",  # "high" | "low"
+    "kind",        # "company" | "macro" - lets the dashboard separate the two
 ]
 
 CONFIDENCES = ("high", "low")
@@ -69,8 +77,16 @@ PER_TICKER_FLOOR = 10
 # Nothing before this date is collected (project start).
 COLLECT_FROM = "2026-07-01"
 
-# Per-company-per-run ceiling: bounds noise at the source.
+# Per-row-per-run ceilings: bound noise at the source. Macro themes are far
+# broader than a company name and legitimately produce more, so they get a
+# higher ceiling than an issuer does.
 MAX_PER_TICKER_PER_RUN = 25
+MAX_PER_MACRO_PER_RUN = 60
+
+# Macro rows would otherwise swamp the archive: six themes covering ~170 terms
+# out-produce all 74 companies combined. This caps their share of the rolling
+# window so the equities the portfolio actually holds stay visible.
+MACRO_SHARE_OF_ARCHIVE = 0.40
 
 # --------------------------------------------------------------------------
 # Network — SSRF allowlist. A host not in this set is never contacted, and a
@@ -97,5 +113,12 @@ USER_AGENT = "portfolio-news-monitor/1.0 (research; contact via repo)"
 # Parsing limits (defence against hostile or malformed feeds).
 # --------------------------------------------------------------------------
 MAX_ITEMS_PER_FEED = 250
+
+# A macro row carries far more aliases than fit in one query, so its terms are
+# split across several. This bounds the request count per row per source.
+# Chunks beyond the limit are DROPPED, and strong aliases are chunked first, so
+# a limit set too low silently loses the weak terms at the tail. build_entities
+# reports any row that would be truncated rather than letting it pass quietly.
+MAX_QUERY_CHUNKS = 14
 MAX_HEADLINE_CHARS = 400
 MAX_URL_CHARS = 2_048

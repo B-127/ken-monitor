@@ -134,9 +134,11 @@ def collect_for(entity, start: dt.date, end: dt.date, sources: set[str],
         stats[verdict] += 1
 
     records.sort(key=lambda r: r["published"], reverse=True)
-    if len(records) > schema.MAX_PER_TICKER_PER_RUN:
-        stats["capped"] += len(records) - schema.MAX_PER_TICKER_PER_RUN
-        records = records[: schema.MAX_PER_TICKER_PER_RUN]
+    ceiling = (schema.MAX_PER_MACRO_PER_RUN if entity.is_macro
+               else schema.MAX_PER_TICKER_PER_RUN)
+    if len(records) > ceiling:
+        stats["capped"] += len(records) - ceiling
+        records = records[:ceiling]
     return records
 
 
@@ -217,7 +219,8 @@ def main() -> int:
     floor = dt.date.fromisoformat(schema.COLLECT_FROM)
     start = floor if args.backfill else max(floor, today - dt.timedelta(days=args.days))
 
-    log(f"entities: {len(entities)} of {len(all_entities)} | "
+    log(f"rows: {len(entities)} of {len(all_entities)} "
+        f"({sum(1 for e in entities if e.is_macro)} macro) | "
         f"window: {start} to {today} | sources: {sorted(sources)} | "
         f"budget: {args.budget_minutes or 'none'} min")
 
@@ -225,6 +228,7 @@ def main() -> int:
                 if args.budget_minutes > 0 else None)
 
     stats = dict(seen=0, high=0, low=0, rejected=0, too_old=0, unusable=0, capped=0)
+    macro_rows = sum(1 for e in entities if e.is_macro)
     breaker = Breaker(sources)
     incoming: list[dict] = []
     processed = 0
@@ -269,7 +273,9 @@ def main() -> int:
     print(f"  source errors     : {total_errors}" + (f"  (down: {dead})" if dead else ""))
     print(f"  archive before    : {len(existing)}")
     print(f"  new after dedupe  : {added}")
-    print(f"  archive after cap : {len(final)} (cap {schema.MAX_ARCHIVE_RECORDS})")
+    n_macro = sum(1 for r in final if r.get("kind") == "macro")
+    print(f"  archive after cap : {len(final)} (cap {schema.MAX_ARCHIVE_RECORDS}) "
+          f"— {len(final) - n_macro} company, {n_macro} macro")
     print(f"  archive changed   : {'yes' if changed else 'no'}")
 
     emit_summary([
@@ -282,7 +288,8 @@ def main() -> int:
         f"| Confirmed matches | {stats['high']} |",
         f"| Flagged for review | {stats['low']} |",
         f"| New after dedupe | {added} |",
-        f"| Archive size | {len(final)} of {schema.MAX_ARCHIVE_RECORDS} |",
+        f"| Archive size | {len(final)} of {schema.MAX_ARCHIVE_RECORDS}"
+        f" ({sum(1 for r in final if r.get('kind') == 'macro')} macro) |",
         f"| Source errors | {total_errors}"
         + (f" - unavailable: {', '.join(dead)}" if dead else "") + " |",
         f"| Archive changed | {'yes' if changed else 'no'} |",
