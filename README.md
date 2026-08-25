@@ -2,7 +2,7 @@
 
 Headlines and links for the 74 companies in the portfolio, collected daily from
 free structured feeds and served as a static dashboard. **No article text is
-ever fetched or stored** — every result is a headline plus a link to the
+ever fetched or stored** every result is a headline plus a link to the
 publisher.
 
 ```
