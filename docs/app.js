@@ -22,6 +22,7 @@ const STATE = {
   from: "",
   to: "",
   confidence: "all",
+  kind: "all",
   source: "all",
   query: "",
   sort: "new",
@@ -94,6 +95,7 @@ function passesFilters(article) {
   if (STATE.to && day > STATE.to) return false;
 
   if (STATE.confidence !== "all" && article.confidence !== STATE.confidence) return false;
+  if (STATE.kind !== "all" && (article.kind || "company") !== STATE.kind) return false;
   if (STATE.source !== "all" && article.source !== STATE.source) return false;
 
   if (STATE.query) {
@@ -110,6 +112,7 @@ function passesExceptCompany(article) {
   if (STATE.from && day < STATE.from) return false;
   if (STATE.to && day > STATE.to) return false;
   if (STATE.confidence !== "all" && article.confidence !== STATE.confidence) return false;
+  if (STATE.kind !== "all" && (article.kind || "company") !== STATE.kind) return false;
   if (STATE.source !== "all" && article.source !== STATE.source) return false;
   if (STATE.query) {
     const hay = (article.headline + " " + (article.publisher || "") + " " + article.company).toLowerCase();
@@ -165,6 +168,7 @@ function renderRail() {
 
   const needle = $("coSearch").value.trim().toLowerCase();
   const visible = STATE.entities.filter((entity) => {
+    if (STATE.kind !== "all" && (entity.kind || "company") !== STATE.kind) return false;
     if (!needle) return true;
     return (entity.name + " " + entity.ticker + " " + (entity.country || "") + " " +
             (entity.industry || "")).toLowerCase().includes(needle);
@@ -194,7 +198,9 @@ function renderRail() {
     label.className = "coname";
     label.setAttribute("for", box.id);
     label.appendChild(document.createTextNode(entity.name));
-    if (entity.status && entity.status !== "active") {
+    if (entity.kind === "macro") {
+      label.appendChild(el("span", "cokind", "economy"));
+    } else if (entity.status && entity.status !== "active") {
       label.appendChild(el("span", "costatus", entity.status));
     }
     body.appendChild(label);
@@ -210,8 +216,8 @@ function renderRail() {
 
   const chosen = STATE.selected.size;
   $("coCount").textContent = chosen
-    ? chosen + " of " + STATE.entities.length + " selected"
-    : "All " + STATE.entities.length + " companies";
+    ? chosen + " of " + visible.length + " selected"
+    : "All " + visible.length + " rows";
 }
 
 /* ---------------------------------------------------------------- results */
@@ -367,6 +373,17 @@ function wire() {
     rerender();
   });
 
+  $("segKind").addEventListener("click", (event) => {
+    const button = event.target.closest("button");
+    if (!button) return;
+    STATE.kind = button.dataset.kind;
+    setSeg($("segKind"), "kind", STATE.kind);
+    // A selection made under one view would silently hide everything in the
+    // other, so switching views clears it.
+    STATE.selected.clear();
+    rerender();
+  });
+
   $("srcSel").addEventListener("change", (event) => {
     STATE.source = event.target.value;
     rerender();
@@ -406,6 +423,7 @@ function wire() {
   $("resetAll").addEventListener("click", () => {
     STATE.selected.clear();
     STATE.confidence = "all";
+    STATE.kind = "all";
     STATE.source = "all";
     STATE.query = "";
     STATE.sort = "new";
@@ -414,6 +432,7 @@ function wire() {
     $("srcSel").value = "all";
     $("sortSel").value = "new";
     setSeg($("segConf"), "conf", "all");
+    setSeg($("segKind"), "kind", "all");
     setSeg($("segRange"), "days", "0");
     applyQuickRange(0);
     rerender();
@@ -431,11 +450,15 @@ function boot(payload) {
   STATE.entities = Array.isArray(payload.entities) && payload.entities.length
     ? payload.entities.slice()
     : [...new Map(STATE.articles.map((article) =>
-        [article.ticker, { ticker: article.ticker, name: article.company, country: "", status: "active", note: "" }]
+        [article.ticker, { ticker: article.ticker, name: article.company, country: "",
+                           status: "active", note: "", kind: article.kind || "company" }]
       )).values()];
 
   $("mCount").textContent = STATE.articles.length.toLocaleString();
   $("mCos").textContent = STATE.entities.length;
+  const macroCount = STATE.entities.filter((e) => e.kind === "macro").length;
+  $("mCos").title = (STATE.entities.length - macroCount) + " holdings + "
+                  + macroCount + " Sri Lanka economy themes";
 
   if (payload.generated) {
     const when = new Date(payload.generated);

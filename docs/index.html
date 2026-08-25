@@ -19,8 +19,7 @@
   base-uri 'none';
   form-action 'none';
   frame-ancestors 'none';">
-<link rel="icon" href="favicon.svg" type="image/svg+xml" />
-<title>Ken Portfolio Monitor</title>
+<title>Portfolio News</title>
 <link rel="stylesheet" href="app.css" />
 </head>
 <body>
@@ -28,8 +27,8 @@
 
 <header class="top">
   <div class="brand">
-    <h1>🦎 Ken Portfolio Monitor</h1>
-    <p class="sub">Headlines. Links open at the publisher's website.</p>
+    <h1>Portfolio News</h1>
+    <p class="sub">Headlines across the holdings. Links open at the publisher &mdash; nothing is copied here.</p>
   </div>
   <dl class="meter">
     <div><dt>Headlines</dt><dd id="mCount">&mdash;</dd></div>
@@ -51,7 +50,8 @@
         <button type="button" class="link" id="coNone">Clear</button>
         <span class="count" id="coCount"></span>
       </div>
-      <p class="hint">The bar under each name shows the last 28 days. A mark is a day that produced a headline.</p>
+      <p class="hint">The bar under each name shows the last 28 days. A mark is a day that produced a headline.
+         Rows marked <em>economy</em> are Sri Lankan macro themes, not holdings.</p>
     </div>
     <ul class="colist" id="coList"></ul>
   </section>
@@ -73,6 +73,14 @@
           <button type="button" data-days="7">7d</button>
           <button type="button" data-days="30">30d</button>
           <button type="button" data-days="0" class="on">All</button>
+        </div>
+      </div>
+      <div class="field">
+        <span class="lbl">Coverage</span>
+        <div class="seg" id="segKind" role="group" aria-label="Coverage type">
+          <button type="button" data-kind="all" class="on">All</button>
+          <button type="button" data-kind="company">Holdings</button>
+          <button type="button" data-kind="macro">Sri Lanka economy</button>
         </div>
       </div>
       <div class="field">
@@ -119,7 +127,10 @@
 </main>
 
 <footer class="foot">
-  <p>Headlines and links are collected from GDELT DOC 2.0 and Google News RSS.</p>
+  <p>Headlines and links are collected from GDELT DOC 2.0 and Google News RSS. Article text is never
+     retrieved or stored &mdash; each result is a headline and a link to the publisher.
+     Results marked <em>needs a look</em> matched a name that could refer to something else, or a
+     Sri Lanka macro term whose only link to Sri Lanka was the publisher rather than the headline.</p>
 </footer>
 
 <script src="app.js" defer></script>

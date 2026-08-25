@@ -117,6 +117,12 @@ input[type=search]:hover,input[type=date]:hover,select:hover{border-color:#cbd2d
   background:var(--flag-soft);color:var(--flag);vertical-align:1px;font-weight:650;
 }
 
+.cokind{
+  display:inline-block;margin-left:6px;padding:0 5px;border-radius:4px;
+  font-size:9.5px;letter-spacing:.05em;text-transform:uppercase;
+  background:var(--accent-soft);color:#075e56;vertical-align:1px;font-weight:650;
+}
+
 /* the signature element: 28 days of coverage, one mark per day */
 .spark{display:grid;grid-template-columns:repeat(28,1fr);gap:1px;margin-top:6px;height:11px}
 .spark i{background:var(--rule-2);border-radius:1px}
