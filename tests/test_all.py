@@ -46,7 +46,7 @@ def entity(**kw):
     base = dict(ticker="T", name="Test Co", aliases=["Test Co"], context_terms=[],
                 negative_terms=[], country="X", industry="Y", ambiguous=False,
                 status="active", note="", verified="", weak=set(),
-                required_terms=[], kind="company")
+                required_terms=[], kind="company", flag_terms=[])
     base.update(kw)
     return ent.Entity(**base).compile()
 
@@ -83,7 +83,7 @@ def _t3():
         path = os.path.join(tmp, "e.csv")
         with open(path, "w", encoding="utf-8") as fh:
             fh.write(",".join(schema.ENTITY_COLS) + "\n")
-            fh.write("T,,Alias,,,X,Y,no,active,,,company,\n")   # name blank
+            fh.write("T,,Alias,,,,X,Y,no,active,,,company,\n")   # name blank
         try:
             ent.load(path)
             raise AssertionError("expected EntityError for a blank name")
@@ -97,7 +97,7 @@ def _t4():
         path = os.path.join(tmp, "e.csv")
         with open(path, "w", encoding="utf-8") as fh:
             fh.write(",".join(schema.ENTITY_COLS) + "\n")
-            fh.write("T,Name,Alias Here,,,X,Y,yes,active,,,company,\n")
+            fh.write("T,Name,Alias Here,,,,X,Y,yes,active,,,company,\n")
         try:
             ent.load(path)
             raise AssertionError("expected EntityError for missing context terms")
@@ -146,7 +146,7 @@ def _t7c():
         path = os.path.join(tmp, "e.csv")
         with open(path, "w", encoding="utf-8") as fh:
             fh.write(",".join(schema.ENTITY_COLS) + "\n")
-            fh.write("T,Name,Alias Here,coal,,X,Y,yes,active,,,company,\n")  # yes, no ~
+            fh.write("T,Name,Alias Here,coal,,,X,Y,yes,active,,,company,\n")  # yes, no ~
         try:
             ent.load(path)
             raise AssertionError("expected EntityError for flag/marker mismatch")
@@ -154,13 +154,75 @@ def _t7c():
             assert "marked weak" in str(exc), exc
 
 
-@check("negative term overrides an alias hit")
+@check("a hard block deletes an article that names only the wrong subject")
 def _t8():
-    e = entity(aliases=["Blackstone Minerals"],
+    e = entity(aliases=["Blackstone Minerals", "Blackstone"],
+               weak={"Blackstone"}, ambiguous=True,
+               context_terms=["nickel"], negative_terms=["Blackstone Inc"])
+    # Weak alias + block term: almost certainly the other Blackstone.
+    verdict, reason = matching.score(e, "Blackstone Inc closes property fund")
+    assert verdict == matching.REJECT, (verdict, reason)
+
+
+@check("an exact company name outranks a hard block, but is flagged")
+def _t8b():
+    # Previously this article was deleted, which lost real coverage: the
+    # holding is named outright in the headline. It is now kept and graded
+    # low so the analyst decides.
+    e = entity(aliases=["Blackstone Minerals", "Blackstone"],
+               weak={"Blackstone"}, ambiguous=True,
                context_terms=["nickel"], negative_terms=["Blackstone Inc"])
     verdict, reason = matching.score(
         e, "Blackstone Inc and Blackstone Minerals both named in nickel report")
-    assert verdict == matching.REJECT, (verdict, reason)
+    assert verdict == matching.LOW, (verdict, reason)
+    assert "Blackstone Minerals" in reason, reason
+
+
+@check("a flag term keeps the article but downgrades it")
+def _t8c():
+    e = entity(aliases=["Blackstone Minerals"], flag_terms=["private equity"])
+    verdict, reason = matching.score(
+        e, "Blackstone Minerals secures private equity backing")
+    assert verdict == matching.LOW, (verdict, reason)
+    assert "private equity" in reason, reason
+    # Without the flag term the same alias confirms outright.
+    assert matching.score(e, "Blackstone Minerals lifts nickel resource")[0] \
+        == matching.HIGH
+
+
+@check("a term cannot both block and flag the same article")
+def _t8d():
+    with tempfile.TemporaryDirectory() as tmp:
+        path = os.path.join(tmp, "e.csv")
+        with open(path, "w", encoding="utf-8") as fh:
+            fh.write(",".join(schema.ENTITY_COLS) + "\n")
+            fh.write("T,Name,Alias Here,,museum,museum,X,Y,no,active,,,company,\n")
+        try:
+            ent.load(path)
+            raise AssertionError("expected EntityError for a term in both tiers")
+        except ent.EntityError as exc:
+            assert "both negative_terms and flag_terms" in str(exc), exc
+
+
+@check("macro rows exclude cricket and other non-economic Sri Lankan news")
+def _t8e():
+    loaded = {e.ticker: e for e in ent.load(ENTITY_FILE)}
+    real = loaded["SL MACRO REAL"]
+    assert matching.score(real, "Sri Lanka cricket board reports growth")[0] \
+        == matching.REJECT
+    assert matching.score(real, "Sri Lanka GDP growth beats forecast")[0] \
+        == matching.HIGH
+    for m in (e for e in loaded.values() if e.kind == "macro"):
+        assert "cricket" in [t.lower() for t in m.negative_terms], \
+            f"{m.ticker} does not exclude cricket"
+
+
+@check("no entity has a term in both exclusion tiers")
+def _t8f():
+    for e in ent.load(ENTITY_FILE):
+        overlap = ({t.lower() for t in e.negative_terms}
+                   & {t.lower() for t in e.flag_terms})
+        assert not overlap, f"{e.ticker}: {sorted(overlap)} in both tiers"
 
 
 @check("alias matches only on word boundaries")
@@ -232,7 +294,7 @@ def _t12e():
         path = os.path.join(tmp, "e.csv")
         with open(path, "w", encoding="utf-8") as fh:
             fh.write(",".join(schema.ENTITY_COLS) + "\n")
-            fh.write("M,Theme,~inflation,coal,,LK,X,yes,active,,,macro,\n")
+            fh.write("M,Theme,~inflation,coal,,,LK,X,yes,active,,,macro,\n")
         try:
             ent.load(path)
             raise AssertionError("expected EntityError for an unscoped macro row")
