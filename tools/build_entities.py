@@ -457,7 +457,7 @@ MACRO_ROWS: list[tuple] = [
      "", "macro", _SCOPE),
 
     ("SL MACRO FINANCIAL", "Sri Lanka - Financial",
-     "Colombo Stock Exchange|All Share Price Index|S&P SL20|Bank of Ceylon"
+     "Colombo Stock Exchange|All Share Price Index|S&P SL20|~CSE|~ASPI|Bank of Ceylon"
      "|People's Bank|National Savings Bank|Commercial Bank of Ceylon"
      "|Sampath Bank|Hatton National Bank|Seylan Bank|NDB Bank"
      "|~banking sector|~non-performing loans|~capital adequacy"
@@ -482,6 +482,84 @@ MACRO_ROWS: list[tuple] = [
 ]
 
 
+# ---------------------------------------------------------------------------
+# Two tiers of exclusion, applied as an overlay so the tables above stay
+# readable and the terms live in one place.
+#
+#   BLOCK  hard: the article is deleted. Only for terms that mean a plainly
+#          different subject - the Peabody Awards, the Cavendish banana, the
+#          Stanmore Tube station. A wrong entry here is INVISIBLE: it removes
+#          articles nobody ever sees. Keep anything arguable out of it.
+#   FLAG   soft: the article is kept and graded 'low' for the analyst to
+#          judge. Use for words that usually mean the wrong subject but
+#          sometimes do not.
+#
+# A strong alias outranks a hard block, so naming the holding exactly still
+# wins - see matching.score(). Rows absent from both tables have names
+# distinctive enough that nothing plausibly collides; inventing terms for them
+# would add risk with no gain.
+# ---------------------------------------------------------------------------
+
+BLOCK: dict[str, str] = {
+    "CNKS LN Equity": "Cavendish banana|Cavendish Laboratory|Cavendish Square"
+                      "|Cavendish Nuclear|Cavendish Farms|Henry Cavendish"
+                      "|Duke of Devonshire|Chatsworth",
+    "BTU US Equity":  "Peabody Museum|Peabody Trust|Peabody Housing"
+                      "|Peabody Conservatory|Peabody Sisters",
+    "SMR AU Equity":  "Harrow|Stanmore Road|Stanmore Hill|Stanmore Bay",
+    "XAM AU Equity":  "Kubla Khan|Coleridge|Citizen Kane|Olivia Newton-John"
+                      "|Xanadu Resort|Xanadu Beach",
+    "KAR AU Equity":  "Karun River|Karoon River|Khuzestan",
+    "LPI US Equity":  "Crescent Point|Fertile Crescent|Crescent Moon",
+    "SXE AU Equity":  "Southern Cross Care|Southern Cross Cable"
+                      "|Southern Cross Health|Southern Cross Airport",
+    "BSX AU Equity":  "Blackstone Credit|Blackstone Griffin",
+    "2343 HK Equity": "Pacific Basin Economic Council|Pacific Basin Partnership",
+    "STANLY TB Equity": "Stanley Black|Morgan Stanley|Stanley Cup",
+    "HCC US Equity":  "Golden State Warriors",
+    "SHLPH PM Equity": "Shell plc|Royal Dutch Shell",
+    "FP CN Equity":   "FP McCann|FP Markets",
+}
+
+FLAG: dict[str, str] = {
+    "BSX AU Equity":  "private equity|buyout|real estate fund",
+    "CNKS LN Equity": "banana|physics|laboratory",
+    "SMR AU Equity":  "London",
+    "BTU US Equity":  "museum|archaeology|journalism",
+    "KAR AU Equity":  "Iran",
+    "GDYR IJ Equity": "Akron|Ohio",
+    "2343 HK Equity": "forum|summit|council",
+    "2111 HK Equity": "forum|summit|council",
+    "1382 HK Equity": "forum|summit|council",
+    "RIGS IJ Equity": "tender award|tender notice",
+}
+
+# Sri Lankan news is dominated by subjects that are not economics. Cricket
+# alone is the single largest category, so excluding it is the biggest single
+# gain available to the macro rows.
+_MACRO_BLOCK = ("cricket|Test match|wicket|batsman|bowler|all-rounder|Asia Cup"
+                "|Premadasa Stadium|Galle Test|horoscope|lottery|obituary"
+                "|box office|film review|recipe|weather warning|road accident")
+_MACRO_FLAG = "opinion|editorial|column|letter to the editor"
+
+MACRO_BLOCK_EXTRA: dict[str, str] = {
+    "SL MACRO COMMODITIES": "gold medal|Olympic gold|gold rush|Golden Globe",
+    "SL MACRO FINANCIAL":   "credit card offer|personal loan offer",
+    "SL MACRO REAL":        "growth spurt|hair growth",
+}
+
+
+def _merge(existing: str, extra: str) -> str:
+    """Union two pipe-separated lists, order-preserving, case-insensitive."""
+    out, seen = [], set()
+    for part in (existing or "").split("|") + (extra or "").split("|"):
+        part = part.strip()
+        if part and part.lower() not in seen:
+            seen.add(part.lower())
+            out.append(part)
+    return "|".join(out)
+
+
 def build_rows() -> list[dict]:
     rows = []
     for row in ROWS:
@@ -493,7 +571,9 @@ def build_rows() -> list[dict]:
             "country": country, "industry": industry, "ambiguous": ambiguous,
             "status": status, "note": note, "verified": verified,
             "kind": "company", "required_terms": "",
+            "flag_terms": FLAG.get(ticker, ""),
         })
+        rows[-1]["negative_terms"] = _merge(negative, BLOCK.get(ticker, ""))
     for (ticker, name, aliases, context, negative, country, industry,
          ambiguous, status, note, verified, kind, required) in MACRO_ROWS:
         rows.append({
@@ -502,7 +582,10 @@ def build_rows() -> list[dict]:
             "country": country, "industry": industry, "ambiguous": ambiguous,
             "status": status, "note": note, "verified": verified,
             "kind": kind, "required_terms": required,
+            "flag_terms": _merge("", _MACRO_FLAG),
         })
+        rows[-1]["negative_terms"] = _merge(
+            _merge(negative, _MACRO_BLOCK), MACRO_BLOCK_EXTRA.get(ticker, ""))
     return rows
 
 
@@ -534,6 +617,14 @@ def main() -> int:
     args = ap.parse_args()
 
     rows = build_rows()
+
+    known = {r["ticker"] for r in rows}
+    for table, label in ((BLOCK, "BLOCK"), (FLAG, "FLAG"),
+                         (MACRO_BLOCK_EXTRA, "MACRO_BLOCK_EXTRA")):
+        stray = sorted(set(table) - known)
+        if stray:
+            print(f"{label} refers to unknown ticker(s): {stray}", file=sys.stderr)
+            return 2
 
     tickers = [r["ticker"] for r in rows]
     if len(tickers) != len(set(tickers)):
@@ -579,6 +670,10 @@ def main() -> int:
     if truncated:
         print(f"  TRUNCATED QUERY PLANS (terms will be lost): {truncated}")
     print(f"  ambiguous (need context to score high): {len(ambiguous)}")
+    print(f"  rows with hard blocks                  : "
+          f"{sum(1 for e in loaded if e.negative_terms)}")
+    print(f"  rows with soft flags                   : "
+          f"{sum(1 for e in loaded if e.flag_terms)}")
     print(f"  corporate status not yet verified      : {len(unverified)}")
     return 0
 

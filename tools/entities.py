@@ -64,6 +64,7 @@ class Entity:
     aliases: list[str]
     context_terms: list[str]
     negative_terms: list[str]
+    flag_terms: list[str]
     required_terms: list[str]
     kind: str
     country: str
@@ -76,12 +77,14 @@ class Entity:
     _alias_res: list[re.Pattern] = field(default_factory=list, repr=False)
     _context_res: list[re.Pattern] = field(default_factory=list, repr=False)
     _negative_res: list[re.Pattern] = field(default_factory=list, repr=False)
+    _flag_res: list[re.Pattern] = field(default_factory=list, repr=False)
     _required_res: list[re.Pattern] = field(default_factory=list, repr=False)
 
     def compile(self) -> "Entity":
         self._alias_res = [_term_pattern(a) for a in self.aliases]
         self._context_res = [_term_pattern(t) for t in self.context_terms]
         self._negative_res = [_term_pattern(t) for t in self.negative_terms]
+        self._flag_res = [_term_pattern(t) for t in self.flag_terms]
         self._required_res = [_term_pattern(t) for t in self.required_terms]
         return self
 
@@ -111,7 +114,22 @@ class Entity:
         return any(rx.search(text) for rx in self._context_res)
 
     def hits_negative(self, text: str) -> str | None:
+        """A hard block: this term means the article is about something else."""
         for term, rx in zip(self.negative_terms, self._negative_res):
+            if rx.search(text):
+                return term
+        return None
+
+    def hits_flag(self, text: str) -> str | None:
+        """A soft block: suspicious, but not proof. Keeps the article, graded low.
+
+        For words that usually mean the wrong subject but sometimes do not -
+        'private equity' next to Blackstone Minerals is normally the other
+        Blackstone, yet a miner can genuinely raise money from one. Blocking
+        those outright would delete real news silently; flagging them puts the
+        judgement in front of the analyst instead.
+        """
+        for term, rx in zip(self.flag_terms, self._flag_res):
             if rx.search(text):
                 return term
         return None
@@ -171,6 +189,30 @@ def _row_errors(row: dict, seen_tickers: set[str]) -> list[str]:
     # A macro row's aliases ("inflation", "budget deficit") would otherwise
     # match every economics story on earth. Refuse the row outright rather than
     # let an unscoped theme flood the archive.
+    # Both block tiers are matched literally and folded, same as aliases.
+    for col in ("negative_terms", "flag_terms"):
+        for t in _split(row.get(col, "")):
+            if len(t) < 3:
+                errs.append(f"{col} entry '{t}' is too short to match safely")
+            from .matching import normalise as _fold3
+            if _fold3(t) != t:
+                errs.append(f"{col} entry '{t}' must be stored accent-folded")
+
+    # A block term identical to an alias would delete every article the alias
+    # was meant to find. Substring overlap is fine and intended ("Peabody
+    # Museum" blocking while "Peabody" matches); exact equality never is.
+    alias_set = {a.lstrip("~").lower() for a in _split(row.get("aliases", ""))}
+    for col in ("negative_terms", "flag_terms"):
+        clash = alias_set & {t.lower() for t in _split(row.get(col, ""))}
+        if clash:
+            errs.append(f"{col} entry identical to an alias: {sorted(clash)}")
+
+    # A term cannot both delete and flag the same article.
+    both = ({t.lower() for t in _split(row.get("negative_terms", ""))}
+            & {t.lower() for t in _split(row.get("flag_terms", ""))})
+    if both:
+        errs.append(f"term(s) in both negative_terms and flag_terms: {sorted(both)}")
+
     required = _split(row.get("required_terms", ""))
     if kind == "macro" and not required:
         errs.append("macro rows must supply required_terms to scope them")
@@ -224,6 +266,7 @@ def load(path: str) -> list[Entity]:
             weak={a.lstrip("~") for a in _split(row["aliases"]) if a.startswith("~")},
             context_terms=_split(row.get("context_terms", "")),
             negative_terms=_split(row.get("negative_terms", "")),
+            flag_terms=_split(row.get("flag_terms", "")),
             required_terms=_split(row.get("required_terms", "")),
             kind=row["kind"].strip().lower(),
             country=(row.get("country") or "").strip(),

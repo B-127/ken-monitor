@@ -5,8 +5,10 @@ inspected — the project never fetches article bodies. That is a real
 constraint on what can be known, so the rules are deliberately conservative
 and the outcome is graded rather than binary:
 
-    reject  a negative term fired, no alias appeared, or a scoped row's
-            required term was absent
+    reject  no alias appeared, a scoped row's required term was absent, or a
+            weak alias collided with a hard block term
+    low     ...also when a flag term appeared, or when a hard block term
+            appeared alongside an exact company name
     high    an alias appeared and either the name is distinctive, or an
             ambiguous name was corroborated by a context term
     low     an ambiguous name appeared with nothing to corroborate it, or the
@@ -57,19 +59,32 @@ def score(entity: Entity, headline: str, publisher: str = "") -> tuple[str, str]
     # like a match for every Sri Lankan company.
     haystack = f"{text} {normalise(publisher)}".strip()
 
-    negative = entity.hits_negative(haystack)
-    if negative:
-        return REJECT, f"negative term '{negative}'"
-
     hit = entity.matched_alias(text)
     if not hit:
         return REJECT, "no alias in headline"
     alias, is_weak = hit
 
+    negative = entity.hits_negative(haystack)
+
+    # Precedence: a STRONG alias outranks a hard block. If the headline names
+    # the holding exactly - "Blackstone Inc and Blackstone Minerals both named
+    # in nickel report" - the article is about the holding, whatever else it
+    # also mentions. Deleting it there would lose real coverage. A weak alias
+    # gets no such privilege: a bare "Blackstone" beside "Blackstone Inc" is
+    # far more likely to be the other one.
+    if is_weak and negative:
+        return REJECT, f"negative term '{negative}'"
+
+    flag = entity.hits_flag(haystack)
+
     # A strong alias settles it on its own, and on a macro row it is also its
     # own proof of scope: "AWPLR" and "CCPI" are Sri Lankan by construction, so
     # they need no separate marker and must be tested BEFORE the scope gate.
     if not is_weak:
+        if negative:
+            return LOW, f"alias '{alias}' but negative term '{negative}' also present"
+        if flag:
+            return LOW, f"alias '{alias}', flagged term '{flag}'"
         return HIGH, f"alias '{alias}'"
 
     # From here the alias is weak, so the row's scope must carry it. Absent
@@ -83,6 +98,9 @@ def score(entity: Entity, headline: str, publisher: str = "") -> tuple[str, str]
     # is asked to confirm rather than told.
     if entity.required_terms and not entity.has_required(text):
         return LOW, f"weak alias '{alias}', scope only from publisher"
+
+    if flag:
+        return LOW, f"weak alias '{alias}', flagged term '{flag}'"
 
     if entity.has_context(haystack):
         return HIGH, f"weak alias '{alias}' + context"

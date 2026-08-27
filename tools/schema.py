@@ -15,7 +15,8 @@ ENTITY_COLS = [
     "name",            # canonical display name (what the analyst sees)
     "aliases",         # pipe-separated; every name the entity is known by
     "context_terms",   # pipe-separated; corroborating words for ambiguous names
-    "negative_terms",  # pipe-separated; if present, the article is rejected
+    "negative_terms",  # pipe-separated; hard block - the article is rejected
+    "flag_terms",      # pipe-separated; soft block - kept, but graded 'low'
     "country",
     "industry",
     "ambiguous",       # yes|no — does the name need corroboration to count?
