@@ -45,10 +45,16 @@ def build_queries(entity) -> list[str]:
     weak = sorted((a for a in entity.aliases if a in entity.weak),
                   key=len, reverse=True)
 
-    scope = ""
-    if entity.required_terms:
-        scope = " " + _or_block(
-            sorted(entity.required_terms, key=len, reverse=True)[:MAX_SCOPE_TERMS])
+    # Scope terms are taken in the order the resolver lists them, NOT sorted.
+    # Sorting by length once picked the longest terms - which were outlet names
+    # - and silently dropped "Sri Lanka" itself from the query.
+    #
+    # Weak aliases are generic ("inflation", "Peabody"), so they are always
+    # narrowed at the source: by required_terms on a macro row, or by
+    # context_terms on a company. Querying them bare returns the whole world
+    # and leaves the matcher to throw almost all of it away.
+    narrowing = entity.required_terms or entity.context_terms
+    scope = " " + _or_block(narrowing[:MAX_SCOPE_TERMS]) if narrowing else ""
 
     def _chunk(terms):
         return [terms[i:i + MAX_ALIASES_PER_QUERY] for i in range(0, len(terms), MAX_ALIASES_PER_QUERY)]
