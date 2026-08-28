@@ -47,6 +47,18 @@ def normalise(text: str) -> str:
 
 REJECT, LOW, HIGH = "reject", "low", "high"
 
+# A Sri Lankan outlet is identified by its country domain, never by its name.
+# Names like "Daily Mirror" and "Sunday Times" belong to UK papers too; a .lk
+# domain cannot be confused with anything.
+_LK_SOURCE = re.compile(r"(?:^|[./@])[\w-]+\.lk(?:$|[/:?])|(?:^|\W)lk(?:$|\W)", re.I)
+
+
+def from_lk_source(publisher: str) -> bool:
+    """True when the publisher looks like a Sri Lankan domain."""
+    if not publisher:
+        return False
+    return bool(re.search(r"\.lk\b", publisher, re.I))
+
 
 def score(entity: Entity, headline: str, publisher: str = "") -> tuple[str, str]:
     """Return (verdict, reason). Verdict is one of reject / low / high."""
@@ -87,17 +99,18 @@ def score(entity: Entity, headline: str, publisher: str = "") -> tuple[str, str]
             return LOW, f"alias '{alias}', flagged term '{flag}'"
         return HIGH, f"alias '{alias}'"
 
-    # From here the alias is weak, so the row's scope must carry it. Absent
-    # altogether, the article is not ours at all.
-    if not entity.has_required(haystack):
+    # From here the alias is weak, so the row's scope must carry it.
+    in_headline = entity.has_required(text)
+    in_publisher = entity.has_required(haystack) or from_lk_source(publisher)
+    if not in_publisher:
         return REJECT, "weak alias but required scope term absent"
 
     # A weak alias on a scoped row needs the marker in the headline itself.
     # Finding it only in the outlet's name is suggestive, not conclusive — a
     # Sri Lankan paper also reports on the rest of the world — so the analyst
     # is asked to confirm rather than told.
-    if entity.required_terms and not entity.has_required(text):
-        return LOW, f"weak alias '{alias}', scope only from publisher"
+    if entity.required_terms and not in_headline:
+        return LOW, f"weak alias '{alias}', scope only from the publisher"
 
     if flag:
         return LOW, f"weak alias '{alias}', flagged term '{flag}'"

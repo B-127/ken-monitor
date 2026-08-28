@@ -394,9 +394,19 @@ ROWS: list[tuple] = [
 # scoped only by the publisher is graded 'low' for the analyst to confirm.
 # ---------------------------------------------------------------------------
 
-_SCOPE = ("Sri Lanka|Sri Lankan|Colombo|CBSL|Central Bank of Sri Lanka|rupee|LKR|Lankan"
-          "|EconomyNext|Daily FT|Daily Mirror|The Island|Sunday Times|Ada Derana"
-          "|Newsfirst|Daily News|Sunday Observer|Ceylon Today")
+# ORDER MATTERS. The query builder takes the first few terms, so the most
+# reliable markers must come first.
+#
+# Outlet names are deliberately absent. An earlier version listed them here and
+# it was a serious mistake: "Daily Mirror", "Sunday Times", "Sunday Observer"
+# and "The Island" are UK publications, so the scope block matched British news
+# and the feeds returned the world's economics coverage. Sri Lankan outlets are
+# now recognised by their .lk domain instead - see matching.from_lk_source().
+#
+# "rupee" is absent for the same reason: India, Pakistan, Nepal, Mauritius and
+# the Seychelles all have one.
+_SCOPE = ("Sri Lanka|Sri Lankan|Colombo|CBSL|Central Bank of Sri Lanka"
+          "|Lankan|LKR|Sri Lankan rupee")
 
 MACRO_ROWS: list[tuple] = [
     ("SL MACRO MONETARY", "Sri Lanka - Monetary",
@@ -661,6 +671,29 @@ def main() -> int:
         if max(need_g, need_n) > schema.MAX_QUERY_CHUNKS:
             truncated.append(f"{e.ticker} needs {max(need_g, need_n)} chunks")
     reqs = sum(len(_gd.build_queries(e)) + len(_gn.build_queries(e)) for e in loaded)
+
+    # Scope audit. A macro row whose generic terms are queried without a Sri
+    # Lanka marker will pull in the whole world's economics coverage, and the
+    # failure is silent - the archive just fills with foreign news. Fail the
+    # build rather than let that ship.
+    unscoped = []
+    for e in loaded:
+        if e.kind != "macro":
+            continue
+        for mod in (_gd, _gn):
+            for q in mod.build_queries(e):
+                if any(f'"{w}"' in q for w in e.weak) and "Lanka" not in q:
+                    unscoped.append(f"{e.ticker} ({mod.__name__.split('.')[-1]})")
+                    break
+    if unscoped:
+        print("\nSCOPE FAILURE: generic terms would be queried worldwide:",
+              file=sys.stderr)
+        for u in sorted(set(unscoped)):
+            print(f"  {u}", file=sys.stderr)
+        print("Check the ordering of _SCOPE - the query builder takes the "
+              "first few terms, so the strongest markers must come first.\n",
+              file=sys.stderr)
+        return 2
 
     print(f"validated {len(loaded)} entities")
     print(f"  macro rows                             : "
