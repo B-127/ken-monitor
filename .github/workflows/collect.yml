@@ -47,8 +47,21 @@ jobs:
 
       # Both gates run before anything touches the network: a broken resolver
       # or a failing test should stop the run, not write a bad archive.
-      - name: Validate the entity file
-        run: python -m tools.build_entities --check
+      #
+      # data/entities.csv is build output, derived from ROWS and MACRO_ROWS in
+      # build_entities.py. Regenerating it here rather than only checking it
+      # means a run can never fail because the committed CSV lagged behind a
+      # code change - it just rebuilds and carries on, and warns so the drift
+      # gets committed rather than silently persisting.
+      - name: Rebuild and validate the entity file
+        run: |
+          set -euo pipefail
+          python -m tools.build_entities
+          if ! git diff --quiet -- data/entities.csv; then
+            echo "::warning title=Entity file was stale::data/entities.csv did not match \
+            build_entities.py and has been regenerated for this run. Run \
+            'python -m tools.build_entities' locally and commit the result."
+          fi
 
       - name: Run tests
         run: python tests/test_all.py
