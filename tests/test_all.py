@@ -349,6 +349,93 @@ def _t12i():
     assert sum(1 for r in out if r["kind"] == "company") >= 200
 
 
+@check("REGRESSION: every scoped query actually contains a Sri Lanka marker")
+def _t12j():
+    # The bug this pins: scope terms were sorted by length, which picked the
+    # longest — outlet names like "Sunday Observer" — and dropped "Sri Lanka"
+    # from the query entirely. The feeds were then asked for UK newspaper
+    # coverage and returned the world's economics news.
+    for e in ent.load(ENTITY_FILE):
+        if e.kind != "macro":
+            continue
+        for mod in (gdelt, gnews):
+            for q in mod.build_queries(e):
+                weak_in_q = [w for w in e.weak if f'"{w}"' in q]
+                if not weak_in_q:
+                    continue
+                assert "Lanka" in q, (
+                    f"{e.ticker}: generic terms {weak_in_q} queried without a "
+                    f"Sri Lanka marker — query was: {q[:160]}")
+
+
+@check("REGRESSION: no scope term is a name another country's press also uses")
+def _t12k():
+    # "Daily Mirror", "Sunday Times", "Sunday Observer", "The Island" and
+    # "Daily News" are all UK or US publications too, and "rupee" belongs to
+    # five other countries. None may be used to prove Sri Lankan scope.
+    forbidden = {"daily mirror", "sunday times", "sunday observer", "the island",
+                 "daily news", "rupee", "daily ft", "newsfirst", "ceylon today",
+                 "ada derana", "economynext"}
+    for e in ent.load(ENTITY_FILE):
+        clash = {t.lower() for t in e.required_terms} & forbidden
+        assert not clash, (
+            f"{e.ticker}: {sorted(clash)} cannot prove Sri Lankan scope — "
+            f"use a .lk domain check instead")
+
+
+@check("Sri Lankan outlets are recognised by domain, not by name")
+def _t12l():
+    assert matching.from_lk_source("dailymirror.lk")
+    assert matching.from_lk_source("ft.lk")
+    assert matching.from_lk_source("www.economynext.lk")
+    # The UK papers that broke this must NOT register.
+    assert not matching.from_lk_source("Daily Mirror")
+    assert not matching.from_lk_source("Sunday Times")
+    assert not matching.from_lk_source("mirror.co.uk")
+    assert not matching.from_lk_source("")
+
+
+@check("a weak company alias is never queried bare")
+def _t12m():
+    # "Peabody" or "Cavendish" on its own returns the whole world and leaves
+    # the matcher to discard almost all of it. Every weak alias must be
+    # narrowed at the source by its context terms.
+    for e in ent.load(ENTITY_FILE):
+        if e.kind != "company" or not e.weak:
+            continue
+        for mod in (gdelt, gnews):
+            for q in mod.build_queries(e):
+                if not any(f'"{w}"' in q for w in e.weak):
+                    continue
+                assert ") (" in q or q.rstrip().endswith(")") and " (" in q, (
+                    f"{e.ticker}: weak alias queried without narrowing: {q[:120]}")
+
+
+@check("foreign economic news never reaches a macro row")
+def _t12n():
+    loaded = {e.ticker: e for e in ent.load(ENTITY_FILE)}
+    cases = [
+        ("SL MACRO MONETARY", "UK inflation falls to 2.1%", "Daily Mirror"),
+        ("SL MACRO MONETARY", "Bank of England cuts rates", "Sunday Times"),
+        ("SL MACRO FISCAL", "US budget deficit widens", "Sunday Observer"),
+        ("SL MACRO REAL", "Nepal GDP growth slows", "Kathmandu Post"),
+        ("SL MACRO EXTERNAL", "Pakistan rupee slides", "Dawn"),
+    ]
+    for ticker, headline, publisher in cases:
+        verdict, reason = matching.score(loaded[ticker], headline, publisher)
+        assert verdict == matching.REJECT, (headline, publisher, verdict, reason)
+
+    # ...while genuine Sri Lankan coverage still confirms.
+    mon = loaded["SL MACRO MONETARY"]
+    assert matching.score(mon, "Sri Lanka inflation eases to 3.2%", "reuters.com")[0] \
+        == matching.HIGH
+    assert matching.score(mon, "CBSL holds policy rate", "reuters.com")[0] \
+        == matching.HIGH
+    # A .lk outlet with no country in the headline is kept, but flagged.
+    assert matching.score(mon, "Inflation eases in August", "dailymirror.lk")[0] \
+        == matching.LOW
+
+
 # ---------------------------------------------------------------- security
 
 @check("URLs off the allowlist, and private addresses, are refused")
