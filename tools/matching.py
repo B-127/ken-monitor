@@ -88,18 +88,24 @@ def score(entity: Entity, headline: str, publisher: str = "") -> tuple[str, str]
 
     flag = entity.hits_flag(haystack)
 
-    # A strong alias settles it on its own, and on a macro row it is also its
-    # own proof of scope: "AWPLR" and "CCPI" are Sri Lankan by construction, so
-    # they need no separate marker and must be tested BEFORE the scope gate.
-    if not is_weak:
-        if negative:
-            return LOW, f"alias '{alias}' but negative term '{negative}' also present"
-        if flag:
-            return LOW, f"alias '{alias}', flagged term '{flag}'"
-        return HIGH, f"alias '{alias}'"
+    # Only a SOVEREIGN alias may skip the country gate. "AWPLR" and "CBSL"
+    # cannot refer to anywhere else, so they are their own proof of origin.
+    #
+    # A merely strong alias does not qualify, however distinctive it looks.
+    # "Ministry of Finance" and "Appropriation Bill" identify the subject
+    # precisely and say nothing whatever about the country - exempting them
+    # let Estonia, Germany and India into the Sri Lankan fiscal feed.
+    is_sovereign = alias in entity.sovereign
 
-    # From here the alias is weak, so scope must carry it - and on a scoped
-    # row scope is an ALLOWLIST, not a filter. The article is accepted only if
+    if is_sovereign:
+        if negative:
+            return LOW, f"sovereign alias '{alias}' but negative term '{negative}'"
+        if flag:
+            return LOW, f"sovereign alias '{alias}', flagged term '{flag}'"
+        return HIGH, f"sovereign alias '{alias}'"
+
+    # Everything else must clear the country gate - and on a scoped row that
+    # gate is an ALLOWLIST, not a filter. The article is accepted only if
     # it can be proven Sri Lankan: a verified Sri Lankan publisher, or the
     # country named in the headline itself. Anything else is refused, whatever
     # the feed returned.
@@ -114,8 +120,18 @@ def score(entity: Entity, headline: str, publisher: str = "") -> tuple[str, str]
             return REJECT, "not provably Sri Lankan: foreign publisher, no marker in headline"
     else:
         in_headline = True
-        if not entity.has_required(haystack):
+        if is_weak and not entity.has_required(haystack):
             return REJECT, "weak alias but required scope term absent"
+
+    # A strong (non-sovereign) alias that cleared the gate is confirmed.
+    if not is_weak:
+        if negative:
+            return LOW, f"alias '{alias}' but negative term '{negative}' also present"
+        if flag:
+            return LOW, f"alias '{alias}', flagged term '{flag}'"
+        if entity.required_terms and not in_headline:
+            return LOW, f"alias '{alias}', Sri Lankan publisher but no marker in headline"
+        return HIGH, f"alias '{alias}'"
 
     # A weak alias on a scoped row needs the marker in the headline itself.
     # Finding it only in the outlet's name is suggestive, not conclusive — a

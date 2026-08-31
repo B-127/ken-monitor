@@ -53,11 +53,21 @@ def _term_pattern(term: str) -> re.Pattern:
 class Entity:
     """A tracked company and the vocabulary that identifies it.
 
-    Aliases come in two strengths. A *strong* alias is distinctive enough to
-    settle the question on its own ("Peabody Energy", "Stanmore Resources").
-    A *weak* alias, written with a leading '~' in the CSV, is a form that
-    could refer to something else ("~Peabody", "~Stanmore") and therefore
-    needs a context term before a match counts as confirmed.
+    Aliases come in three strengths, marked by a prefix in the CSV.
+
+      !name   SOVEREIGN. Unique to Sri Lanka by construction - "AWPLR",
+              "CBSL", "Colombo Tea Auction". Only these may skip the country
+              gate on a macro row.
+      name    STRONG. Distinctive enough to identify the subject, but NOT
+              proof of country. "Ministry of Finance" and "Appropriation
+              Bill" are strong and emphatically not sovereign: every country
+              has them.
+      ~name   WEAK. Could refer to something else entirely ("~inflation",
+              "~Peabody"); needs a context term to be confirmed.
+
+    The distinction between sovereign and strong matters enormously. Treating
+    every strong alias as self-scoping let Estonia's, Germany's and India's
+    finance ministries into the Sri Lankan fiscal feed.
     """
     ticker: str
     name: str
@@ -74,6 +84,7 @@ class Entity:
     note: str
     verified: str
     weak: set[str] = field(default_factory=set)
+    sovereign: set[str] = field(default_factory=set)
     _alias_res: list[re.Pattern] = field(default_factory=list, repr=False)
     _context_res: list[re.Pattern] = field(default_factory=list, repr=False)
     _negative_res: list[re.Pattern] = field(default_factory=list, repr=False)
@@ -160,8 +171,13 @@ def _row_errors(row: dict, seen_tickers: set[str]) -> list[str]:
     if ambiguous not in schema.YES_NO:
         errs.append(f"ambiguous '{ambiguous}' must be yes or no")
 
-    aliases = [a.lstrip("~") for a in _split(row.get("aliases", ""))]
-    weak = [a for a in _split(row.get("aliases", "")) if a.startswith("~")]
+    raw_aliases = _split(row.get("aliases", ""))
+    aliases = [a.lstrip("~!") for a in raw_aliases]
+    weak = [a for a in raw_aliases if a.startswith("~")]
+    sovereign = [a for a in raw_aliases if a.startswith("!")]
+    for a in raw_aliases:
+        if a.startswith("~") and a.startswith("!"):
+            errs.append(f"alias '{a}' cannot be both weak and sovereign")
     if not aliases:
         errs.append("at least one alias is required")
     for a in aliases:
@@ -201,7 +217,7 @@ def _row_errors(row: dict, seen_tickers: set[str]) -> list[str]:
     # A block term identical to an alias would delete every article the alias
     # was meant to find. Substring overlap is fine and intended ("Peabody
     # Museum" blocking while "Peabody" matches); exact equality never is.
-    alias_set = {a.lstrip("~").lower() for a in _split(row.get("aliases", ""))}
+    alias_set = {a.lstrip("~!").lower() for a in _split(row.get("aliases", ""))}
     for col in ("negative_terms", "flag_terms"):
         clash = alias_set & {t.lower() for t in _split(row.get(col, ""))}
         if clash:
@@ -262,8 +278,9 @@ def load(path: str) -> list[Entity]:
         entities.append(Entity(
             ticker=row["ticker"].strip(),
             name=row["name"].strip(),
-            aliases=[a.lstrip("~") for a in _split(row["aliases"])],
-            weak={a.lstrip("~") for a in _split(row["aliases"]) if a.startswith("~")},
+            aliases=[a.lstrip("~!") for a in _split(row["aliases"])],
+            weak={a.lstrip("~!") for a in _split(row["aliases"]) if a.startswith("~")},
+            sovereign={a.lstrip("~!") for a in _split(row["aliases"]) if a.startswith("!")},
             context_terms=_split(row.get("context_terms", "")),
             negative_terms=_split(row.get("negative_terms", "")),
             flag_terms=_split(row.get("flag_terms", "")),

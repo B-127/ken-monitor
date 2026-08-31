@@ -405,30 +405,30 @@ ROWS: list[tuple] = [
 #
 # "rupee" is absent for the same reason: India, Pakistan, Nepal, Mauritius and
 # the Seychelles all have one.
-_SCOPE = ("Sri Lanka|Sri Lankan|Colombo|CBSL|Central Bank of Sri Lanka"
+_SCOPE = ("Sri Lanka|Sri Lankan|Colombo|!CBSL|Central Bank of Sri Lanka"
           "|Lankan|LKR|Sri Lankan rupee")
 
 MACRO_ROWS: list[tuple] = [
     ("SL MACRO MONETARY", "Sri Lanka - Monetary",
-     "CBSL|Central Bank of Sri Lanka|Monetary Policy Board|Monetary Board"
+     "!CBSL|!Central Bank of Sri Lanka|Monetary Policy Board|Monetary Board"
      "|Overnight Policy Rate|Standing Deposit Facility Rate"
      "|Standing Lending Facility Rate|Statutory Reserve Ratio"
-     "|AWPLR|AWDR|AWFDR|CCPI|NCPI|Colombo Consumer Price Index"
+     "|!AWPLR|!AWDR|!AWFDR|!CCPI|!NCPI|!Colombo Consumer Price Index"
      "|National Consumer Price Index"
      "|~inflation|~headline inflation|~core inflation|~disinflation|~deflation"
      "|~policy rate|~rate cut|~rate hike|~monetary policy|~money supply"
      "|~broad money|~reserve money|~open market operations|~market liquidity"
      "|~private sector credit|~credit growth|~inflation target",
-     "Sri Lanka|Colombo|CBSL|rupee|monetary|inflation|policy rate|central bank",
+     "Sri Lanka|Colombo|!CBSL|rupee|monetary|inflation|policy rate|central bank",
      "", "Sri Lanka", "Monetary", "yes", "active",
      "Economic theme, not a holding. Only matches when a Sri Lanka marker is present.",
      "", "macro", _SCOPE),
 
     ("SL MACRO FISCAL", "Sri Lanka - Fiscal",
      "Ministry of Finance|Inland Revenue Department|Appropriation Bill"
-     "|Domestic Debt Optimisation|Sri Lanka Development Bond"
-     "|Social Security Contribution Levy|Ceylon Petroleum Corporation"
-     "|Ceylon Electricity Board|SriLankan Airlines|Employees Provident Fund"
+     "|!Domestic Debt Optimisation|!Sri Lanka Development Bond"
+     "|!Social Security Contribution Levy|!Ceylon Petroleum Corporation"
+     "|!Ceylon Electricity Board|!SriLankan Airlines|Employees Provident Fund"
      "|~budget deficit|~fiscal deficit|~primary balance|~primary surplus"
      "|~tax revenue|~PAYE|~income tax|~corporate tax|~excise duty|~customs duty"
      "|~public debt|~debt restructuring|~debt sustainability|~sovereign default"
@@ -441,7 +441,7 @@ MACRO_ROWS: list[tuple] = [
      "", "macro", _SCOPE),
 
     ("SL MACRO EXTERNAL", "Sri Lanka - External",
-     "Board of Investment|Export Development Board|Port of Colombo|Hambantota"
+     "Board of Investment|Export Development Board|!Port of Colombo|!Hambantota"
      "|Extended Fund Facility|Official Creditor Committee|Paris Club"
      "|International Sovereign Bond"
      "|~balance of payments|~current account|~trade deficit|~trade balance"
@@ -456,7 +456,7 @@ MACRO_ROWS: list[tuple] = [
      "", "macro", _SCOPE),
 
     ("SL MACRO REAL", "Sri Lanka - Real",
-     "Department of Census and Statistics|Sri Lanka Tea Board|Ceylon Tea"
+     "Department of Census and Statistics|!Sri Lanka Tea Board|!Ceylon Tea"
      "|~gross domestic product|~economic growth|~GDP growth|~recession"
      "|~economic contraction|~industrial production|~Purchasing Managers Index"
      "|~manufacturing output|~services sector|~agriculture output"
@@ -468,9 +468,9 @@ MACRO_ROWS: list[tuple] = [
      "", "macro", _SCOPE),
 
     ("SL MACRO FINANCIAL", "Sri Lanka - Financial",
-     "Colombo Stock Exchange|All Share Price Index|S&P SL20|~CSE|~ASPI|Bank of Ceylon"
+     "!Colombo Stock Exchange|!All Share Price Index|!S&P SL20|~CSE|~ASPI|!Bank of Ceylon"
      "|People's Bank|National Savings Bank|Commercial Bank of Ceylon"
-     "|Sampath Bank|Hatton National Bank|Seylan Bank|NDB Bank"
+     "|!Sampath Bank|!Hatton National Bank|!Seylan Bank|NDB Bank"
      "|~banking sector|~non-performing loans|~capital adequacy"
      "|~licensed commercial banks|~finance companies|~lending rates"
      "|~deposit rates|~bond yields|~market capitalisation|~market turnover"
@@ -482,7 +482,7 @@ MACRO_ROWS: list[tuple] = [
      "", "macro", _SCOPE),
 
     ("SL MACRO COMMODITIES", "Sri Lanka - Commodities",
-     "Colombo Tea Auction|Ceylon Cinnamon"
+     "!Colombo Tea Auction|!Ceylon Cinnamon"
      "|~tea prices|~rubber prices|~coconut prices|~cinnamon exports"
      "|~gold price|~crude oil|~fuel prices|~fuel price revision"
      "|~electricity tariff|~fertiliser",
@@ -553,6 +553,13 @@ _MACRO_BLOCK = ("cricket|Test match|wicket|batsman|bowler|all-rounder|Asia Cup"
                 "|box office|film review|recipe|weather warning|road accident")
 _MACRO_FLAG = "opinion|editorial|column|letter to the editor"
 
+# Terms that mark an article as off-topic for a segment even though it names a
+# genuinely Sri Lankan institution. Route announcements mention SriLankan
+# Airlines constantly and tell a fiscal analyst nothing.
+MACRO_FLAG_EXTRA: dict[str, str] = {
+    "SL MACRO FISCAL": "flight|flights|weekly services|air service|Middle East network|Middle East schedule",
+}
+
 MACRO_BLOCK_EXTRA: dict[str, str] = {
     "SL MACRO COMMODITIES": "gold medal|Olympic gold|gold rush|Golden Globe",
     "SL MACRO FINANCIAL":   "credit card offer|personal loan offer",
@@ -593,7 +600,7 @@ def build_rows() -> list[dict]:
             "country": country, "industry": industry, "ambiguous": ambiguous,
             "status": status, "note": note, "verified": verified,
             "kind": kind, "required_terms": required,
-            "flag_terms": _merge("", _MACRO_FLAG),
+            "flag_terms": _merge(_MACRO_FLAG, MACRO_FLAG_EXTRA.get(ticker, "")),
         })
         rows[-1]["negative_terms"] = _merge(
             _merge(negative, _MACRO_BLOCK), MACRO_BLOCK_EXTRA.get(ticker, ""))
@@ -631,7 +638,8 @@ def main() -> int:
 
     known = {r["ticker"] for r in rows}
     for table, label in ((BLOCK, "BLOCK"), (FLAG, "FLAG"),
-                         (MACRO_BLOCK_EXTRA, "MACRO_BLOCK_EXTRA")):
+                         (MACRO_BLOCK_EXTRA, "MACRO_BLOCK_EXTRA"),
+                         (MACRO_FLAG_EXTRA, "MACRO_FLAG_EXTRA")):
         stray = sorted(set(table) - known)
         if stray:
             print(f"{label} refers to unknown ticker(s): {stray}", file=sys.stderr)
@@ -696,7 +704,29 @@ def main() -> int:
               file=sys.stderr)
         return 2
 
+    # Sovereign aliases bypass the country gate, so they must be terms no
+    # other country could use. "Ministry of Finance" once sat here and let
+    # Estonia, Germany and India into the Sri Lankan fiscal feed.
+    generic = ("ministry of finance", "appropriation bill", "central bank",
+               "inland revenue", "board of investment", "monetary board",
+               "provident fund", "census and statistics", "national savings",
+               "treasury", "budget", "stock exchange", "development board")
+    unsafe = []
+    for e in loaded:
+        for a in e.sovereign:
+            low = a.lower()
+            if any(g == low for g in generic):
+                unsafe.append(f"{e.ticker}: '{a}'")
+    if unsafe:
+        print("\nUNSAFE SOVEREIGN ALIASES (these skip the country gate):",
+              file=sys.stderr)
+        for u in unsafe:
+            print(f"  {u}", file=sys.stderr)
+        return 2
+
     print(f"validated {len(loaded)} entities")
+    print(f"  sovereign aliases (skip country gate)  : "
+          f"{sum(len(e.sovereign) for e in loaded)}")
     print(f"  macro rows                             : "
           f"{sum(1 for e in loaded if e.is_macro)}")
     print(f"  requests per collection run            : {reqs}"
