@@ -21,6 +21,7 @@ import tempfile
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
 from tools import archive, entities as ent, matching, net, schema
+from tools.sources_allowlist import is_sri_lankan
 from tools.sources import gdelt, gnews
 
 REPO = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
@@ -278,14 +279,22 @@ def _t12c():
     assert "AWPLR" in reason, reason
 
 
-@check("scope from the publisher alone is flagged, not asserted")
+@check("scope from a Sri Lankan publisher is flagged, not asserted")
 def _t12d():
     e = entity(kind="macro", aliases=["inflation"], weak={"inflation"},
                ambiguous=True, context_terms=["Sri Lanka"],
-               required_terms=["Sri Lanka", "EconomyNext"])
-    verdict, reason = matching.score(e, "Inflation eases to 3.2% in August", "EconomyNext")
+               required_terms=["Sri Lanka"])
+    # A verified Sri Lankan DOMAIN proves origin, so the article is kept - but
+    # graded low, since a Sri Lankan paper also reports on the wider world.
+    verdict, reason = matching.score(
+        e, "Inflation eases to 3.2% in August", "economynext.com")
     assert verdict == matching.LOW, (verdict, reason)
     assert "publisher" in reason, reason
+
+    # A publisher NAME proves nothing - "Daily Mirror" and "Sunday Times" are
+    # UK papers. Only the domain counts.
+    assert matching.score(e, "Inflation eases in August", "Daily Mirror")[0] \
+        == matching.REJECT
 
 
 @check("macro rows must declare required_terms or be refused")
@@ -434,6 +443,119 @@ def _t12n():
     # A .lk outlet with no country in the headline is kept, but flagged.
     assert matching.score(mon, "Inflation eases in August", "dailymirror.lk")[0] \
         == matching.LOW
+
+
+@check("the publisher allowlist accepts Sri Lankan outlets only")
+def _t12o():
+    for good in ("ft.lk", "www.dailymirror.lk", "bizenglish.adaderana.lk",
+                 "economynext.com", "https://island.lk/story"):
+        assert is_sri_lankan(good), good
+    for bad in ("reuters.com", "mirror.co.uk", "thetimes.co.uk", "",
+                "timesofindia.com", "dailymirror.lk.evil.com", "notlk.com"):
+        assert not is_sri_lankan(bad), bad
+
+
+@check("macro scope is an allowlist: unproven origin is refused")
+def _t12p():
+    loaded = {e.ticker: e for e in ent.load(ENTITY_FILE)}
+    mon = loaded["SL MACRO MONETARY"]
+    # Foreign publisher and no marker in the headline: refused, whatever the
+    # feed returned. This is the fail-closed behaviour that replaced the old
+    # filter-afterwards approach.
+    for headline, publisher in [
+        ("Inflation eases to 2.1% in August", "reuters.com"),
+        ("Central bank holds policy rate", "bloomberg.com"),
+        ("UK inflation falls", "mirror.co.uk"),
+    ]:
+        verdict, reason = matching.score(mon, headline, publisher)
+        assert verdict == matching.REJECT, (headline, publisher, verdict)
+        assert "provably" in reason or "scope" in reason, reason
+
+    # Proven Sri Lankan by publisher: kept, flagged.
+    assert matching.score(mon, "Inflation eases in August", "economynext.com")[0] \
+        == matching.LOW
+    # Proven by the headline itself: confirmed, from any publisher.
+    assert matching.score(mon, "Sri Lanka inflation eases", "reuters.com")[0] \
+        == matching.HIGH
+
+
+@check("macro queries carry GDELT's source-country restriction")
+def _t12q():
+    for e in ent.load(ENTITY_FILE):
+        for q in gdelt.build_queries(e):
+            if e.kind == "macro":
+                assert "sourcecountry:CE" in q, f"{e.ticker} unrestricted: {q[:120]}"
+            else:
+                assert "sourcecountry" not in q, f"{e.ticker} should not be restricted"
+
+
+@check("Google News is not used for macro rows")
+def _t12r():
+    # Its search ignores boolean scope and its links hide the real publisher,
+    # so it can satisfy neither the country restriction nor the allowlist.
+    from tools import collect as col
+    loaded = {e.ticker: e for e in ent.load(ENTITY_FILE)}
+    called = []
+
+    def fake_gnews(entity, fetcher=None):
+        called.append(entity.ticker)
+        return []
+
+    orig = col.gnews.fetch_articles
+    col.gnews.fetch_articles = fake_gnews
+    try:
+        breaker = col.Breaker({"gnews"})
+        stats = dict(seen=0, high=0, low=0, rejected=0, too_old=0,
+                     unusable=0, capped=0)
+        col.collect_for(loaded["SL MACRO MONETARY"], dt.date(2026, 8, 1),
+                        dt.date(2026, 8, 2), {"gnews"}, breaker, stats)
+        col.collect_for(loaded["TKYO SL Equity"], dt.date(2026, 8, 1),
+                        dt.date(2026, 8, 2), {"gnews"}, breaker, stats)
+    finally:
+        col.gnews.fetch_articles = orig
+    assert "SL MACRO MONETARY" not in called, "macro row queried Google News"
+    assert "TKYO SL Equity" in called, "company row should still use Google News"
+
+
+@check("stored records are re-scored, so a rule fix cleans the archive")
+def _t12s():
+    # The archive used to be append-only: anything collected under a rule that
+    # later proved wrong stayed until the cap evicted it, so a correction
+    # appeared to do nothing. Re-scoring makes fixes retroactive.
+    entities = ent.load(ENTITY_FILE)
+    loaded = {e.ticker: e for e in entities}
+    mon = loaded["SL MACRO MONETARY"]
+
+    junk = archive.make_record(
+        mon, {"url": "https://reuters.com/a", "headline": "UK inflation falls to 2.1%",
+              "published": "2026-08-01T00:00:00Z", "publisher": "reuters.com"},
+        "gdelt", "high")
+    good = archive.make_record(
+        mon, {"url": "https://reuters.com/b", "headline": "Sri Lanka inflation eases",
+              "published": "2026-08-02T00:00:00Z", "publisher": "reuters.com"},
+        "gdelt", "high")
+    orphan = dict(good, id="orphan1", ticker="GONE XX Equity")
+
+    kept, dropped = archive.revalidate([junk, good, orphan], entities)
+    kept_ids = {r["id"] for r in kept}
+    assert good["id"] in kept_ids, "genuine article was purged"
+    assert junk["id"] not in kept_ids, "foreign article survived revalidation"
+    assert "orphan1" not in kept_ids, "record for a removed entity survived"
+    assert len(dropped) == 2
+
+
+@check("revalidation refreshes the grade, not just membership")
+def _t12t():
+    entities = ent.load(ENTITY_FILE)
+    mon = {e.ticker: e for e in entities}["SL MACRO MONETARY"]
+    # Stored as confirmed, but under current rules it is only publisher-scoped.
+    rec = archive.make_record(
+        mon, {"url": "https://economynext.com/x", "headline": "Inflation eases in August",
+              "published": "2026-08-02T00:00:00Z", "publisher": "economynext.com"},
+        "gdelt", "high")
+    rec["confidence"] = "high"
+    kept, _ = archive.revalidate([rec], entities)
+    assert kept and kept[0]["confidence"] == "low", kept
 
 
 # ---------------------------------------------------------------- security
@@ -683,6 +805,25 @@ def _t31():
         assert archive.signature(first) == archive.signature(second), \
             "a rewrite with identical articles must not register as a change"
         assert payload["signature"] == archive.signature([rec])
+
+
+@check("a purge-only run still counts as a change and gets written")
+def _t31b():
+    # The bug this pins: the change fingerprint was compared against the
+    # post-revalidation set rather than the file on disk, so a run that only
+    # purged foreign articles reported "no change" and never wrote them out.
+    e = entity()
+    a = archive.make_record(e, {"url": "https://ex.com/a", "headline": "H1",
+                                "published": "2026-08-01T00:00:00Z"}, "gdelt", "high")
+    b = archive.make_record(e, {"url": "https://ex.com/b", "headline": "H2",
+                                "published": "2026-08-02T00:00:00Z"}, "gdelt", "high")
+    stored = [a, b]
+    after_purge = [b]                      # `a` failed revalidation
+    final = archive.apply_window(after_purge)
+    assert archive.signature(stored) != archive.signature(final), \
+        "a purge must register as a change"
+    assert archive.signature(after_purge) == archive.signature(final), \
+        "comparing post-purge to final would hide the purge"
 
 
 @check("the circuit breaker trips a dead source and spares the rest of the run")
