@@ -1,10 +1,9 @@
-# Portfolio News Monitor
+# Ken News Monitor
 
 Headlines and links for the 74 companies in the portfolio **and six Sri Lankan
 macroeconomic themes**, collected daily from free structured feeds and served as
 a static dashboard. **No article text is
-ever fetched or stored** — every result is a headline plus a link to the
-publisher.
+fetched or stored** 
 
 ```
 data/entities.csv          <- the resolver: names, aliases, context, exclusions
