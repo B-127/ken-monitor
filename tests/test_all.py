@@ -47,7 +47,7 @@ def entity(**kw):
     base = dict(ticker="T", name="Test Co", aliases=["Test Co"], context_terms=[],
                 negative_terms=[], country="X", industry="Y", ambiguous=False,
                 status="active", note="", verified="", weak=set(),
-                required_terms=[], kind="company", flag_terms=[])
+                required_terms=[], kind="company", flag_terms=[], sovereign=set())
     base.update(kw)
     return ent.Entity(**base).compile()
 
@@ -267,16 +267,28 @@ def _t12b():
     assert matching.score(e, "Sri Lanka inflation eases to 3.2%")[0] == matching.HIGH
 
 
-@check("a strong macro alias is its own proof of scope")
+@check("only a SOVEREIGN macro alias may skip the country gate")
 def _t12c():
-    # AWPLR and CCPI are Sri Lankan by construction: they must confirm without
-    # a separate marker, and must be tested BEFORE the scope gate runs.
-    e = entity(kind="macro", aliases=["AWPLR", "inflation"], weak={"inflation"},
+    # AWPLR cannot refer to anywhere else, so it confirms unaided.
+    e = entity(kind="macro", aliases=["AWPLR", "Ministry of Finance", "inflation"],
+               weak={"inflation"}, sovereign={"AWPLR"},
                ambiguous=True, context_terms=["Sri Lanka"],
                required_terms=["Sri Lanka"])
-    verdict, reason = matching.score(e, "AWPLR falls to 8.4 percent", "Daily FT")
+    verdict, reason = matching.score(e, "AWPLR falls to 8.4 percent", "reuters.com")
     assert verdict == matching.HIGH, (verdict, reason)
-    assert "AWPLR" in reason, reason
+    assert "sovereign" in reason, reason
+
+    # "Ministry of Finance" is strong but NOT sovereign - every country has
+    # one - so it must still clear the gate. This is the exact bug that let
+    # Estonia's, Germany's and India's finance ministries into the feed.
+    verdict, reason = matching.score(
+        e, "Estonia's Ministry of Finance forecasts tense fiscal situation", "ERR")
+    assert verdict == matching.REJECT, (verdict, reason)
+
+    # The same alias, once origin is proven, is fine.
+    assert matching.score(
+        e, "Sri Lanka Ministry of Finance releases estimates", "reuters.com")[0] \
+        == matching.HIGH
 
 
 @check("scope from a Sri Lankan publisher is flagged, not asserted")
@@ -443,6 +455,53 @@ def _t12n():
     # A .lk outlet with no country in the headline is kept, but flagged.
     assert matching.score(mon, "Inflation eases in August", "dailymirror.lk")[0] \
         == matching.LOW
+
+
+@check("REGRESSION: foreign finance ministries never reach the fiscal row")
+def _t12n2():
+    # Verbatim from the dashboard. Every one of these was scored 'high'
+    # because "Ministry of Finance" and "Appropriation Bill" were treated as
+    # self-scoping. They identify the subject but say nothing about country.
+    fiscal = {e.ticker: e for e in ent.load(ENTITY_FILE)}["SL MACRO FISCAL"]
+    for headline, publisher in [
+        ("Estonia's Ministry of Finance forecasts tense fiscal situation "
+         "in the coming years", "ERR"),
+        ("Parliament passes Appropriation Bill 2026; FM Nirmala Sitharaman "
+         "asserts govt's budgeting is transparent", "News On AIR"),
+        ("Caseware Contributes Expertise to Development of New German Tax "
+         "Data Standard with the Federal Ministry of Finance",
+         "Yahoo Finance Singapore"),
+        ("Ministry of Finance Explains the Concept of Financial Hub Plus PFH",
+         "VOI ID"),
+        ("ICAEW and Ministry of Finance accounting department renew "
+         "cooperation", "Vietnam Investment Review"),
+    ]:
+        verdict, reason = matching.score(fiscal, headline, publisher)
+        assert verdict == matching.REJECT, (headline[:50], verdict, reason)
+
+    # Genuine Sri Lankan fiscal coverage still gets through.
+    assert matching.score(
+        fiscal, "Sri Lanka Ministry of Finance releases budget estimates",
+        "reuters.com")[0] == matching.HIGH
+    assert matching.score(
+        fiscal, "Ministry of Finance releases budget estimates", "ft.lk")[0] \
+        == matching.LOW
+    assert matching.score(
+        fiscal, "Ceylon Petroleum Corporation posts loss", "reuters.com")[0] \
+        == matching.HIGH
+
+
+@check("no sovereign alias is a term another country could use")
+def _t12n3():
+    generic = {"ministry of finance", "appropriation bill", "central bank",
+               "inland revenue department", "board of investment",
+               "monetary board", "employees provident fund", "treasury",
+               "department of census and statistics", "national savings bank"}
+    for e in ent.load(ENTITY_FILE):
+        clash = {a.lower() for a in e.sovereign} & generic
+        assert not clash, (
+            f"{e.ticker}: {sorted(clash)} skips the country gate but is not "
+            f"unique to Sri Lanka")
 
 
 @check("the publisher allowlist accepts Sri Lankan outlets only")
