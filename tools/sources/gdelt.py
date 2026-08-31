@@ -27,6 +27,12 @@ MAX_ALIASES_PER_QUERY = 6
 # combined expression stays within what the endpoint accepts.
 MAX_SCOPE_TERMS = 8
 
+# GDELT restricts by the country a story was PUBLISHED in, independently of
+# keywords. For the Sri Lankan macro rows this is worth more than any term
+# list: it is enforced by the API rather than by getting a keyword right, and
+# it cannot fail open. FIPS code for Sri Lanka is CE.
+SOURCE_COUNTRY = {"macro": "sourcecountry:CE"}
+
 
 def _or_block(terms: list[str]) -> str:
     block = " OR ".join(f'"{t}"' for t in terms)
@@ -72,9 +78,13 @@ def build_queries(entity, *, english_only: bool = False) -> list[str]:
              + [(c, scope) for c in _chunk(weak)])
     pairs = pairs[:schema.MAX_QUERY_CHUNKS]
 
+    country = SOURCE_COUNTRY.get(entity.kind, "")
+
     out = []
     for chunk, suffix in pairs:
         query = _or_block(chunk) + suffix
+        if country:
+            query += " " + country
         if english_only:
             query += " sourcelang:english"
         out.append(query)
