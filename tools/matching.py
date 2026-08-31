@@ -30,6 +30,7 @@ import re
 import unicodedata
 
 from .entities import Entity
+from .sources_allowlist import is_sri_lankan
 
 # Collapse accents so "Tofaş" matches "Tofas" and "Çimsa" matches "Cimsa".
 # Turkish, Vietnamese and Indonesian coverage all depend on this.
@@ -54,10 +55,8 @@ _LK_SOURCE = re.compile(r"(?:^|[./@])[\w-]+\.lk(?:$|[/:?])|(?:^|\W)lk(?:$|\W)", 
 
 
 def from_lk_source(publisher: str) -> bool:
-    """True when the publisher looks like a Sri Lankan domain."""
-    if not publisher:
-        return False
-    return bool(re.search(r"\.lk\b", publisher, re.I))
+    """True when the publisher is verifiably a Sri Lankan outlet."""
+    return is_sri_lankan(publisher)
 
 
 def score(entity: Entity, headline: str, publisher: str = "") -> tuple[str, str]:
@@ -99,18 +98,31 @@ def score(entity: Entity, headline: str, publisher: str = "") -> tuple[str, str]
             return LOW, f"alias '{alias}', flagged term '{flag}'"
         return HIGH, f"alias '{alias}'"
 
-    # From here the alias is weak, so the row's scope must carry it.
-    in_headline = entity.has_required(text)
-    in_publisher = entity.has_required(haystack) or from_lk_source(publisher)
-    if not in_publisher:
-        return REJECT, "weak alias but required scope term absent"
+    # From here the alias is weak, so scope must carry it - and on a scoped
+    # row scope is an ALLOWLIST, not a filter. The article is accepted only if
+    # it can be proven Sri Lankan: a verified Sri Lankan publisher, or the
+    # country named in the headline itself. Anything else is refused, whatever
+    # the feed returned.
+    #
+    # This is deliberately fail-closed. The previous design searched the world
+    # and filtered afterwards, so anything not explicitly excluded got through,
+    # and foreign coverage kept reappearing however many terms were added.
+    if entity.required_terms:
+        in_headline = entity.has_required(text)
+        lk_publisher = from_lk_source(publisher)
+        if not (in_headline or lk_publisher):
+            return REJECT, "not provably Sri Lankan: foreign publisher, no marker in headline"
+    else:
+        in_headline = True
+        if not entity.has_required(haystack):
+            return REJECT, "weak alias but required scope term absent"
 
     # A weak alias on a scoped row needs the marker in the headline itself.
     # Finding it only in the outlet's name is suggestive, not conclusive — a
     # Sri Lankan paper also reports on the rest of the world — so the analyst
     # is asked to confirm rather than told.
     if entity.required_terms and not in_headline:
-        return LOW, f"weak alias '{alias}', scope only from the publisher"
+        return LOW, f"weak alias '{alias}', Sri Lankan publisher but no marker in headline"
 
     if flag:
         return LOW, f"weak alias '{alias}', flagged term '{flag}'"

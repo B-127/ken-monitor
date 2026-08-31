@@ -103,7 +103,12 @@ def collect_for(entity, start: dt.date, end: dt.date, sources: set[str],
             breaker.fail("gdelt")
             log(f"  ! gdelt failed for {entity.ticker}: {exc}")
 
-    if "gnews" in sources and breaker.live("gnews"):
+    # Google News is skipped for macro rows on purpose. Its search does not
+    # honour a boolean scope block, and its links are news.google.com
+    # redirects, so the real publisher domain is hidden - it can satisfy
+    # neither the country restriction nor the publisher allowlist. Company
+    # rows keep it: a name like "Yancoal" carries its own scope.
+    if "gnews" in sources and not entity.is_macro and breaker.live("gnews"):
         try:
             for raw in gnews.fetch_articles(entity):
                 raws.append(("gnews", raw))
@@ -252,11 +257,25 @@ def main() -> int:
         if i % 10 == 0 or i == len(entities):
             log(f"  {i}/{len(entities)} processed, {len(incoming)} records so far")
 
-    existing = archive.load(ARCHIVE_FILE)
+    stored = archive.load(ARCHIVE_FILE)
+
+    # Re-score what is already stored against the current rules before merging.
+    # A correction to the resolver then cleans the archive on the next run,
+    # instead of leaving old mistakes on the dashboard until the cap evicts
+    # them. Only meaningful on a full run - a --only run would drop every row
+    # it was not asked to look at.
+    if args.only:
+        existing, purged = stored, []
+    else:
+        existing, purged = archive.revalidate(stored, all_entities)
+
     merged, added = archive.merge(existing, incoming)
     final = archive.apply_window(merged)
 
-    changed = archive.signature(existing) != archive.signature(final)
+    # Compare against what is ON DISK, not against the post-purge set.
+    # Comparing to `existing` would hide a revalidation-only run - the purge
+    # would be computed, reported, and then never written.
+    changed = archive.signature(stored) != archive.signature(final)
     total_errors = sum(breaker.errors.values())
     dead = sorted(breaker.tripped)
 
@@ -271,7 +290,14 @@ def main() -> int:
     print(f"  unusable records  : {stats['unusable']}")
     print(f"  trimmed by per-run cap     : {stats['capped']}")
     print(f"  source errors     : {total_errors}" + (f"  (down: {dead})" if dead else ""))
-    print(f"  archive before    : {len(existing)}")
+    print(f"  archive before    : {len(stored)}")
+    if purged:
+        by_row: dict[str, int] = {}
+        for rec in purged:
+            by_row[rec.get("company", "?")] = by_row.get(rec.get("company", "?"), 0) + 1
+        top = sorted(by_row.items(), key=lambda kv: -kv[1])[:5]
+        print(f"  purged by current rules    : {len(purged)}"
+              f"  ({', '.join(f'{n}x {c}' for c, n in top)})")
     print(f"  new after dedupe  : {added}")
     n_macro = sum(1 for r in final if r.get("kind") == "macro")
     print(f"  archive after cap : {len(final)} (cap {schema.MAX_ARCHIVE_RECORDS}) "
@@ -287,6 +313,7 @@ def main() -> int:
         f"| Headlines seen | {stats['seen']} |",
         f"| Confirmed matches | {stats['high']} |",
         f"| Flagged for review | {stats['low']} |",
+        f"| Purged by current rules | {len(purged)} |",
         f"| New after dedupe | {added} |",
         f"| Archive size | {len(final)} of {schema.MAX_ARCHIVE_RECORDS}"
         f" ({sum(1 for r in final if r.get('kind') == 'macro')} macro) |",

@@ -111,6 +111,49 @@ def load(path: str) -> list[dict]:
     return [a for a in articles if isinstance(a, dict) and a.get("id")]
 
 
+def revalidate(records: list[dict], entities) -> tuple[list[dict], list[dict]]:
+    """Re-score stored records against the CURRENT rules; drop those that fail.
+
+    Without this the archive is append-only, so anything collected under a rule
+    that later turns out to be wrong stays until the rolling cap evicts it. A
+    fix to the resolver would appear to do nothing for weeks, because the old
+    mistakes are still on the dashboard.
+
+    Re-scoring on every run makes corrections retroactive: change a term, and
+    the next run cleans out everything it should never have kept. Records whose
+    entity no longer exists are dropped too, so removing a holding removes its
+    coverage.
+
+    Grades are refreshed as well as membership - an article that used to
+    confirm but is now only flagged is kept at its new, lower grade rather than
+    left asserting more certainty than the current rules support.
+
+    Returns (kept, dropped).
+    """
+    from . import matching
+
+    by_ticker = {e.ticker: e for e in entities}
+    kept: list[dict] = []
+    dropped: list[dict] = []
+
+    for rec in records:
+        entity = by_ticker.get(rec.get("ticker", ""))
+        if entity is None:
+            dropped.append(rec)
+            continue
+        verdict, _reason = matching.score(
+            entity, rec.get("headline", ""), rec.get("publisher", ""))
+        if verdict == matching.REJECT:
+            dropped.append(rec)
+            continue
+        rec["confidence"] = verdict
+        rec["kind"] = entity.kind
+        rec["company"] = entity.name
+        kept.append(rec)
+
+    return kept, dropped
+
+
 def merge(existing: list[dict], incoming: list[dict]) -> tuple[list[dict], int]:
     """Union by record id, then drop syndicated near-duplicates.
 

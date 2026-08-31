@@ -448,6 +448,7 @@ MACRO_ROWS: list[tuple] = [
      "|~exports|~imports|~remittances|~worker remittances|~tourist arrivals"
      "|~tourism earnings|~foreign reserves|~gross official reserves"
      "|~foreign direct investment|~exchange rate|~depreciation|~appreciation"
+     "|~reserves|~trade gap"
      "|~currency swap|~external debt|~terms of trade|~import restrictions",
      "Sri Lanka|Colombo|rupee|IMF|reserves|exports|imports|tourism|remittances",
      "", "Sri Lanka", "External", "yes", "active",
